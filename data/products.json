@@ -1,0 +1,720 @@
+[
+  {
+    "id": "ck-arden-sofa",
+    "slug": "arden-three-seater-sofa",
+    "name": "Arden Three-Seater Sofa",
+    "price": 78000,
+    "description": "The Arden Sofa embodies our philosophy of quiet luxury. Engineered for longevity, the structure integrates hand-carved kiln-dried teakwood arms with a supportive serpentine spring assembly. The cushions are enveloped in Belgian-milled linen blend fabric, resistant to piling and softly textured to the touch.\n\nEvery silhouette line is smoothed to architectural perfection, delivering a calm presence in both light-drenched contemporary apartments and storied traditional residences.",
+    "category": "Sofa",
+    "space": "living",
+    "tabs": [
+      "bestsellers",
+      "classics",
+      "sets"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1631679706909-1844bbd07221?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1554995207-c18c203602cb?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Cream bouclé",
+      "Warm oat linen"
+    ],
+    "care": "Vacuum regularly. Professional clean only.",
+    "sku": "CK-SOF-001",
+    "compareAt": 95000,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "3-Seater Sofas",
+    "shortExcerpt": "Clean mid-century lines wrapped in natural woven textures. Ergonomic sloped cushions sculpted over sustainably sourced teakwood.",
+    "videoUrl": "https://youtube.com/watch?v=couchkraft-arden-craft",
+    "colorSwatches": [
+      {
+        "name": "Terracotta Rust",
+        "hex": "#B35438",
+        "skuCode": "SKU-TRC",
+        "active": true
+      },
+      {
+        "name": "Warm Ivory",
+        "hex": "#E8DFC9",
+        "skuCode": "SKU-WIV",
+        "active": true
+      },
+      {
+        "name": "Olive Green",
+        "hex": "#5D6B57",
+        "skuCode": "SKU-OLV",
+        "active": true
+      },
+      {
+        "name": "Muted Taupe",
+        "hex": "#9C8F84",
+        "skuCode": "SKU-MTP",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 215,
+      "depth": 92,
+      "height": 84,
+      "seatHeight": 44
+    },
+    "netWeight": "58 kg",
+    "seatingCapacity": "3 Persons (Max 360 kg)",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 8,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Arden Three-Seater Sofa | CouchKraft Bespoke Teak Living",
+    "metaDescription": "Buy the handcrafted Arden Three-Seater Sofa at CouchKraft. Solid kiln-dried teakwood frame wrapped in organic linen upholstery. Handcrafted in India with white-glove delivery.",
+    "status": "published",
+    "unitsSold": 24,
+    "revenue": 1872000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-luma-chair",
+    "slug": "luma-lounge-chair",
+    "name": "Luma Lounge Chair",
+    "price": 42000,
+    "description": "An open oak frame with a deep, cushioned seat. Designed for reading, conversation and the slower hours of the day.",
+    "category": "Chair",
+    "space": "lounge",
+    "tabs": [
+      "bestsellers",
+      "new"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1592078615290-033ee584e267?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1580480055273-228ff5388ef8?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1544457070-4cd773b4d71e?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Natural oak",
+      "Walnut stain"
+    ],
+    "care": "Dust the frame with a dry cloth. Keep out of prolonged direct sun.",
+    "sku": "CK-PRD-002",
+    "compareAt": 50400,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "An open oak frame with a deep, cushioned seat. Designed for reading, conversation and the slower hours of the day.",
+    "videoUrl": "",
+    "colorSwatches": [
+      {
+        "name": "Natural Oak",
+        "hex": "#D2B48C",
+        "skuCode": "SKU-NAT",
+        "active": true
+      },
+      {
+        "name": "Warm Oat",
+        "hex": "#E5D3B3",
+        "skuCode": "SKU-OAT",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 180,
+      "depth": 85,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "45 kg",
+    "seatingCapacity": "2 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 4,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Luma Lounge Chair | CouchKraft Artisanal Furniture",
+    "metaDescription": "An open oak frame with a deep, cushioned seat. Designed for reading, conversation and the slower hours of the day.",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 504000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-nordic-sideboard",
+    "slug": "nordic-walnut-sideboard",
+    "name": "Nordic Walnut Sideboard",
+    "price": 98000,
+    "description": "A three-drawer walnut sideboard with a quiet grain and a low, architectural profile. Storage that reads as furniture, not cabinetry.",
+    "category": "Storage",
+    "space": "living",
+    "tabs": [
+      "bestsellers",
+      "classics"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1611967164521-abae8fba4668?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1556228453-efd6c1ff04f6?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Walnut"
+    ],
+    "care": "Wipe with a slightly damp cloth. Use coasters on the top surface.",
+    "sku": "CK-PRD-003",
+    "compareAt": 117600,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "A three-drawer walnut sideboard with a quiet grain and a low, architectural profile. Storage that reads as furniture, not cabinetry.",
+    "videoUrl": "",
+    "colorSwatches": [
+      {
+        "name": "Natural Oak",
+        "hex": "#D2B48C",
+        "skuCode": "SKU-NAT",
+        "active": true
+      },
+      {
+        "name": "Warm Oat",
+        "hex": "#E5D3B3",
+        "skuCode": "SKU-OAT",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 180,
+      "depth": 85,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "45 kg",
+    "seatingCapacity": "2 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 4,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Nordic Walnut Sideboard | CouchKraft Artisanal Furniture",
+    "metaDescription": "A three-drawer walnut sideboard with a quiet grain and a low, architectural profile. Storage that reads as furniture, not cabinetry.",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 504000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-solene-daybed",
+    "slug": "solene-upholstered-daybed",
+    "name": "Solene Upholstered Daybed",
+    "price": 89000,
+    "description": "A slender daybed in oatmeal linen. Equally at home as a sofa, a guest bed or a quiet place to rest by a window.",
+    "category": "Daybed",
+    "space": "bedroom",
+    "tabs": [
+      "new",
+      "classics"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1540518614846-7eded433c457?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1615873968403-89e068629265?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Oatmeal linen"
+    ],
+    "care": "Rotate cushions periodically. Professional clean only.",
+    "sku": "CK-PRD-004",
+    "compareAt": 106800,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "A slender daybed in oatmeal linen. Equally at home as a sofa, a guest bed or a quiet place to rest by a window.",
+    "videoUrl": "",
+    "colorSwatches": [
+      {
+        "name": "Natural Oak",
+        "hex": "#D2B48C",
+        "skuCode": "SKU-NAT",
+        "active": true
+      },
+      {
+        "name": "Warm Oat",
+        "hex": "#E5D3B3",
+        "skuCode": "SKU-OAT",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 180,
+      "depth": 85,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "45 kg",
+    "seatingCapacity": "2 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 4,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Solene Upholstered Daybed | CouchKraft Artisanal Furniture",
+    "metaDescription": "A slender daybed in oatmeal linen. Equally at home as a sofa, a guest bed or a quiet place to rest by a window.",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 504000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-mira-mirror",
+    "slug": "mira-wall-mirror",
+    "name": "Mira Wall Mirror",
+    "price": 24000,
+    "description": "A round oak-framed mirror with a thin, tactile rim. A simple way to lift light across a hallway, dining room or dressing space.",
+    "category": "Mirror",
+    "space": "lounge",
+    "tabs": [
+      "bestsellers",
+      "new",
+      "sets"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1616046229478-9901c5536a45?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1578500494198-246f612d3b3d?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1618220179428-22790b461013?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1600210491892-03d54c0aaf87?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Natural oak"
+    ],
+    "care": "Clean glass with a non-abrasive cloth.",
+    "sku": "CK-PRD-005",
+    "compareAt": 28800,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "A round oak-framed mirror with a thin, tactile rim. A simple way to lift light across a hallway, dining room or dressing space.",
+    "videoUrl": "",
+    "colorSwatches": [
+      {
+        "name": "Natural Oak",
+        "hex": "#D2B48C",
+        "skuCode": "SKU-NAT",
+        "active": true
+      },
+      {
+        "name": "Warm Oat",
+        "hex": "#E5D3B3",
+        "skuCode": "SKU-OAT",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 180,
+      "depth": 85,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "45 kg",
+    "seatingCapacity": "2 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 4,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Mira Wall Mirror | CouchKraft Artisanal Furniture",
+    "metaDescription": "A round oak-framed mirror with a thin, tactile rim. A simple way to lift light across a hallway, dining room or dressing space.",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 504000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-theo-table",
+    "slug": "theo-coffee-table",
+    "name": "Theo Coffee Table",
+    "price": 36000,
+    "description": "A two-tier oak coffee table with a calm, rectilinear plan. Open storage below for books, trays and the objects of everyday living.",
+    "category": "Table",
+    "space": "living",
+    "tabs": [
+      "bestsellers",
+      "sets",
+      "classics"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1533090481720-856c6e3c1fdc?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1611269154421-4e27233ac5c7?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1600121848594-d8644e57abab?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1616137466211-f939a420be84?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Natural oak"
+    ],
+    "care": "Use felt pads. Avoid standing water on the surface.",
+    "sku": "CK-PRD-006",
+    "compareAt": 43200,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "A two-tier oak coffee table with a calm, rectilinear plan. Open storage below for books, trays and the objects of everyday living.",
+    "videoUrl": "",
+    "colorSwatches": [
+      {
+        "name": "Natural Oak",
+        "hex": "#D2B48C",
+        "skuCode": "SKU-NAT",
+        "active": true
+      },
+      {
+        "name": "Warm Oat",
+        "hex": "#E5D3B3",
+        "skuCode": "SKU-OAT",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 180,
+      "depth": 85,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "45 kg",
+    "seatingCapacity": "2 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 4,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Theo Coffee Table | CouchKraft Artisanal Furniture",
+    "metaDescription": "A two-tier oak coffee table with a calm, rectilinear plan. Open storage below for books, trays and the objects of everyday living.",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 504000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-theo-dining-chair",
+    "slug": "theo-oak-chair",
+    "name": "Theo Oak Chair",
+    "price": 18000,
+    "description": "A sculpted oak dining chair with a curved backrest. Light enough to move, considered enough to keep.",
+    "category": "Chair",
+    "space": "dining",
+    "tabs": [
+      "new",
+      "sets"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1544457070-4cd773b4d71e?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1592078615290-033ee584e267?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1580480055273-228ff5388ef8?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Natural oak"
+    ],
+    "care": "Wipe after meals. Tighten joinery once a year.",
+    "sku": "CK-PRD-007",
+    "compareAt": 21600,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "A sculpted oak dining chair with a curved backrest. Light enough to move, considered enough to keep.",
+    "videoUrl": "",
+    "colorSwatches": [
+      {
+        "name": "Natural Oak",
+        "hex": "#D2B48C",
+        "skuCode": "SKU-NAT",
+        "active": true
+      },
+      {
+        "name": "Warm Oat",
+        "hex": "#E5D3B3",
+        "skuCode": "SKU-OAT",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 180,
+      "depth": 85,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "45 kg",
+    "seatingCapacity": "2 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 4,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Theo Oak Chair | CouchKraft Artisanal Furniture",
+    "metaDescription": "A sculpted oak dining chair with a curved backrest. Light enough to move, considered enough to keep.",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 504000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-haven-bed",
+    "slug": "haven-upholstered-bed",
+    "name": "Haven Upholstered Bed",
+    "price": 126000,
+    "compareAt": 151200,
+    "description": "A low upholstered bed with a generous headboard. Soft structure, quiet colour and a silhouette made for unhurried mornings.",
+    "category": "Bed",
+    "space": "bedroom",
+    "tabs": [
+      "new",
+      "classics"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1540518614846-7eded433c457?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1615876234886-fd9a39fda97f?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1615873968403-89e068629265?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Warm oat",
+      "Stone linen"
+    ],
+    "care": "Spot clean fabric. Professional clean for the headboard.",
+    "sku": "CK-PRD-008",
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "A low upholstered bed with a generous headboard. Soft structure, quiet colour and a silhouette made for unhurried mornings.",
+    "videoUrl": "",
+    "colorSwatches": [
+      {
+        "name": "Natural Oak",
+        "hex": "#D2B48C",
+        "skuCode": "SKU-NAT",
+        "active": true
+      },
+      {
+        "name": "Warm Oat",
+        "hex": "#E5D3B3",
+        "skuCode": "SKU-OAT",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 180,
+      "depth": 85,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "45 kg",
+    "seatingCapacity": "2 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 4,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Haven Upholstered Bed | CouchKraft Artisanal Furniture",
+    "metaDescription": "A low upholstered bed with a generous headboard. Soft structure, quiet colour and a silhouette made for unhurried mornings.",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 504000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-orb-pendant",
+    "slug": "orb-pendant-light",
+    "name": "Orb Pendant Light",
+    "price": 16000,
+    "description": "A dark, dome pendant that gathers light over a table or daybed. Understated, architectural and easy to live with.",
+    "category": "Lighting",
+    "space": "dining",
+    "tabs": [
+      "new"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1513506003901-1e6a229e2d15?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1550254478-ead40cc54513?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Matte charcoal"
+    ],
+    "care": "Disconnect power before cleaning. Dust with a dry cloth.",
+    "sku": "CK-PRD-009",
+    "compareAt": 19200,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "A dark, dome pendant that gathers light over a table or daybed. Understated, architectural and easy to live with.",
+    "videoUrl": "",
+    "colorSwatches": [
+      {
+        "name": "Natural Oak",
+        "hex": "#D2B48C",
+        "skuCode": "SKU-NAT",
+        "active": true
+      },
+      {
+        "name": "Warm Oat",
+        "hex": "#E5D3B3",
+        "skuCode": "SKU-OAT",
+        "active": true
+      }
+    ],
+    "dimensions": {
+      "width": 180,
+      "depth": 85,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "45 kg",
+    "seatingCapacity": "2 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 4,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Orb Pendant Light | CouchKraft Artisanal Furniture",
+    "metaDescription": "A dark, dome pendant that gathers light over a table or daybed. Understated, architectural and easy to live with.",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 504000,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-14T07:11:50.375Z"
+  },
+  {
+    "id": "ck-linen-ottoman",
+    "slug": "linen-ottoman",
+    "name": "Linen Ottoman",
+    "price": 22000,
+    "description": "A compact upholstered ottoman in warm linen. Use as a footrest, extra seat or a low table with a tray.",
+    "category": "Ottoman",
+    "space": "lounge",
+    "tabs": [
+      "bestsellers",
+      "sets"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1540574163026-643ea20ade25?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1484101403633-562f891dc89a?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "finishes": [
+      "Warm oat linen"
+    ],
+    "care": "Vacuum the fabric. Rotate to even the wear.",
+    "sku": "CK-OTM-010",
+    "compareAt": 26000,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "subCategory": "Standard",
+    "shortExcerpt": "",
+    "videoUrl": "",
+    "colorSwatches": [],
+    "dimensions": {
+      "depth": 90,
+      "width": 200,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "",
+    "seatingCapacity": "",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 7,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "",
+    "metaDescription": "",
+    "status": "published",
+    "unitsSold": 12,
+    "revenue": 0,
+    "createdAt": "2026-10-14T07:11:50.375Z",
+    "updatedAt": "2026-10-18T13:12:51.482Z",
+    "compare_at": 26000,
+    "gst_slab": "18% GST (Standard Furniture)",
+    "hsn_code": "9403 6000",
+    "sub_category": "Standard",
+    "short_excerpt": "",
+    "video_url": "",
+    "color_swatches": [],
+    "net_weight": "",
+    "seating_capacity": "",
+    "structural_wood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foam_upholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "ready_to_ship_stock": 7,
+    "low_stock_threshold": 2,
+    "made_to_order": true,
+    "lead_time_weeks": 3,
+    "customization_enabled": true,
+    "customization_tolerance_cm": 15,
+    "allow_com_upholstery": true,
+    "meta_title": "",
+    "meta_description": "",
+    "units_sold": 0,
+    "created_at": "2026-10-17T17:12:21.313598+00:00",
+    "updated_at": "2026-10-17T17:12:21.313598+00:00",
+    "category_id": "cat_accent",
+    "customizationOptions": {},
+    "categoryId": "cat_accent"
+  }
+]

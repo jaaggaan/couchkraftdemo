@@ -7,6 +7,61 @@ export type CollectionTab = 'bestsellers' | 'new' | 'sets' | 'classics'
 
 export type ProductSpace = 'living' | 'dining' | 'bedroom' | 'lounge'
 
+export type CustomizationOptionItem = {
+  id: string
+  label: string
+  priceDelta: number
+  description?: string
+  swatchHex?: string
+}
+
+export type DimensionSpec = {
+  enabled: boolean
+  min: number
+  max: number
+  step: number
+  defaultVal: number
+  unit: 'cm' | 'inches'
+  pricePerUnitDelta?: number
+}
+
+export type ProductCustomizationConfig = {
+  enabled: boolean
+  seatingOptions?: CustomizationOptionItem[]
+  dimensionSpecs?: {
+    width?: DimensionSpec
+    depth?: DimensionSpec
+    height?: DimensionSpec
+    seatHeight?: DimensionSpec
+  }
+  fabrics?: CustomizationOptionItem[]
+  colors?: CustomizationOptionItem[]
+  finishes?: CustomizationOptionItem[]
+  materials?: CustomizationOptionItem[]
+  notesPlaceholder?: string
+}
+
+export type SelectedCustomization = {
+  seating?: string
+  seatingPriceDelta?: number
+  width?: number
+  depth?: number
+  height?: number
+  dimensionUnit?: 'cm' | 'inches'
+  dimensionPriceDelta?: number
+  fabric?: string
+  fabricPriceDelta?: number
+  color?: string
+  colorHex?: string
+  colorPriceDelta?: number
+  finish?: string
+  finishPriceDelta?: number
+  material?: string
+  materialPriceDelta?: number
+  totalCustomizationDelta: number
+  notes?: string
+}
+
 export type Product = {
   id: string
   slug: string
@@ -20,6 +75,14 @@ export type Product = {
   images: string[]
   finishes: string[]
   care: string
+  readyToShipStock?: number
+  lowStockThreshold?: number
+  madeToOrder?: boolean
+  leadTimeWeeks?: number
+  status?: string
+  customizationEnabled?: boolean
+  customizationOptions?: ProductCustomizationConfig
+  dimensions?: { width: number; depth: number; height: number; seatHeight?: number }
 }
 
 const img = (id: string, w = 1200) =>
@@ -44,6 +107,44 @@ export const products: Product[] = [
     ],
     finishes: ['Cream bouclé', 'Warm oat linen'],
     care: 'Vacuum regularly. Professional clean only.',
+    customizationEnabled: true,
+    customizationOptions: {
+      enabled: true,
+      seatingOptions: [
+        { id: '2-seater', label: '2-Seater (Compact)', priceDelta: -12000, description: 'Width 170cm · Intimate living spaces' },
+        { id: '3-seater', label: '3-Seater (Standard)', priceDelta: 0, description: 'Width 220cm · Signature proportions' },
+        { id: '4-seater', label: '4-Seater (Grand)', priceDelta: 16000, description: 'Width 270cm · Expansive lounge silhouette' },
+        { id: 'l-shaped', label: 'L-Shaped Sectional', priceDelta: 38000, description: 'Width 290cm with left/right chaise lounger' },
+      ],
+      dimensionSpecs: {
+        width: { enabled: true, min: 160, max: 300, step: 5, defaultVal: 220, unit: 'cm', pricePerUnitDelta: 150 },
+        depth: { enabled: true, min: 85, max: 110, step: 5, defaultVal: 95, unit: 'cm' },
+        height: { enabled: true, min: 75, max: 90, step: 5, defaultVal: 80, unit: 'cm' },
+      },
+      fabrics: [
+        { id: 'cream-boucle', label: 'Heavy Cream Bouclé', priceDelta: 0, description: 'Soft textured warmth with high rub count' },
+        { id: 'warm-oat-linen', label: 'Belgian Linen Blend', priceDelta: 3500, description: 'Breathable stonewashed European linen' },
+        { id: 'royal-velvet', label: 'Deep Moss Velvet', priceDelta: 7000, description: 'Plush stain-resistant architectural velvet' },
+        { id: 'italian-leather', label: 'Cognac Full-Grain Leather', priceDelta: 32000, description: 'Hand-burnished Italian aniline leather' },
+      ],
+      colors: [
+        { id: 'ivory', label: 'Warm Ivory', swatchHex: '#E8DFC9', priceDelta: 0 },
+        { id: 'terracotta', label: 'Terracotta Rust', swatchHex: '#B35438', priceDelta: 0 },
+        { id: 'moss', label: 'Olive Moss', swatchHex: '#5D6B57', priceDelta: 0 },
+        { id: 'taupe', label: 'Muted Taupe', swatchHex: '#9C8F84', priceDelta: 0 },
+        { id: 'charcoal', label: 'Charcoal Slate', swatchHex: '#36393F', priceDelta: 0 },
+      ],
+      finishes: [
+        { id: 'nat-oak', label: 'Natural White Oak', priceDelta: 0 },
+        { id: 'walnut', label: 'Dark American Walnut', priceDelta: 3000 },
+        { id: 'smoked-ash', label: 'Smoked Ebonized Ash', priceDelta: 4500 },
+      ],
+      materials: [
+        { id: 'teak-frame', label: 'Kiln-Dried Teak Wood Frame', priceDelta: 0 },
+        { id: 'sheesham-frame', label: 'Seasoned Sheesham Hardwood', priceDelta: -4000 },
+      ],
+      notesPlaceholder: 'E.g. Chaise on right-hand side, firmer 40-density seat foam...',
+    },
   },
   {
     id: 'ck-luma-chair',
@@ -63,6 +164,37 @@ export const products: Product[] = [
     ],
     finishes: ['Natural oak', 'Walnut stain'],
     care: 'Dust the frame with a dry cloth. Keep out of prolonged direct sun.',
+    customizationEnabled: true,
+    customizationOptions: {
+      enabled: true,
+      seatingOptions: [
+        { id: 'single', label: 'Standard Lounge Chair', priceDelta: 0 },
+        { id: 'with-ottoman', label: 'Chair + Matching Footstool Ottoman', priceDelta: 14000 },
+      ],
+      dimensionSpecs: {
+        width: { enabled: true, min: 70, max: 95, step: 5, defaultVal: 80, unit: 'cm' },
+        depth: { enabled: true, min: 75, max: 95, step: 5, defaultVal: 85, unit: 'cm' },
+        height: { enabled: true, min: 75, max: 90, step: 5, defaultVal: 82, unit: 'cm' },
+      },
+      fabrics: [
+        { id: 'textured-boucle', label: 'Textured Bouclé', priceDelta: 0 },
+        { id: 'belgian-linen', label: 'Belgian Linen', priceDelta: 2500 },
+        { id: 'aniline-leather', label: 'Tan Saddle Leather', priceDelta: 12000 },
+      ],
+      colors: [
+        { id: 'natural-oat', label: 'Natural Oat', swatchHex: '#E5D3B3', priceDelta: 0 },
+        { id: 'amber-rust', label: 'Amber Rust', swatchHex: '#C06C47', priceDelta: 0 },
+        { id: 'sage-green', label: 'Forest Sage', swatchHex: '#4A5B4E', priceDelta: 0 },
+      ],
+      finishes: [
+        { id: 'natural-oak', label: 'Natural Oak Frame', priceDelta: 0 },
+        { id: 'walnut-stain', label: 'Walnut Stain Frame', priceDelta: 1800 },
+      ],
+      materials: [
+        { id: 'oak-wood', label: 'Solid White Oak', priceDelta: 0 },
+        { id: 'teak-wood', label: 'Burma Teak Hardwood', priceDelta: 4500 },
+      ],
+    },
   },
   {
     id: 'ck-nordic-sideboard',

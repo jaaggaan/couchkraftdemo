@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b tsconfig.app.json tsconfig.node.json && vite build && npm run bundle:api",
+    "build": "tsc -b tsconfig.app.json tsconfig.node.json && vite build && npm run build --prefix admin && npm run bundle:api",
     "bundle:api": "npx esbuild server/vercel-handler.ts --bundle --platform=node --format=esm --outfile=api/index.js --packages=external",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "npm --prefix admin install"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.3",
     "bcryptjs": "^3.0.3",
     "jsonwebtoken": "^9.0.3",
     "react": "^19.2.8",

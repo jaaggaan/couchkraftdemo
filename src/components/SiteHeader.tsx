@@ -218,14 +218,24 @@ export function SiteHeader() {
               </div>
             ) : (
               <>
-                {lines.map(({ product, quantity, finish }) => (
-                  <div className="cart-row" key={product.id}>
+                {lines.map(({ product, quantity, finish, customization, unitPrice }: any) => (
+                  <div className="cart-row" key={product.id + (finish || '') + JSON.stringify(customization || {})}>
                     <img src={product.images[0]} alt="" />
                     <div>
                       <Link to={`/product/${product.slug}`} onClick={() => setCartOpen(false)}>
                         {product.name}
                       </Link>
                       <p className="form-note">{finish}</p>
+                      {customization && (
+                        <p className="form-note" style={{ color: '#835022', fontSize: 11, margin: '2px 0 0' }}>
+                          {[
+                            customization.seating,
+                            customization.width ? `${customization.width}×${customization.depth}×${customization.height}${customization.dimensionUnit || 'cm'}` : null,
+                            customization.fabric,
+                            customization.color,
+                          ].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
                       <div className="qty" style={{ marginTop: 8 }}>
                         <button type="button" onClick={() => setQuantity(product.id, quantity - 1)} aria-label="Decrease">
                           −
@@ -237,8 +247,8 @@ export function SiteHeader() {
                       </div>
                     </div>
                     <div>
-                      <strong>{formatPrice(product.price * quantity)}</strong>
-                      <button type="button" className="link-btn" onClick={() => removeFromCart(product.id)}>
+                      <strong>{formatPrice((unitPrice || product.price) * quantity)}</strong>
+                      <button type="button" className="link-btn" onClick={() => removeFromCart(product.id, finish, customization)}>
                         Remove
                       </button>
                     </div>

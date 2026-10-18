@@ -500,6 +500,31 @@ p {
   transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.product-slider.is-swipe {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  transform: none;
+  transition: none;
+  scrollbar-width: none;
+}
+
+.product-slider.is-swipe::-webkit-scrollbar {
+  display: none;
+}
+
+.product-slide {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 100%;
+  height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
 .product-slider img {
   flex: 0 0 100%;
   width: 100%;
@@ -512,6 +537,10 @@ p {
   pointer-events: none;
 }
 
+.product-slide img {
+  flex: none;
+}
+
 .slide-dots {
   position: absolute;
   left: 0;
@@ -519,9 +548,10 @@ p {
   bottom: 10px;
   display: flex;
   justify-content: center;
-  gap: 5px;
+  align-items: center;
+  gap: 6px;
+  z-index: 4;
   pointer-events: none;
-  z-index: 2;
 }
 
 .slide-dots span {
@@ -533,6 +563,91 @@ p {
 
 .slide-dots span.is-on {
   background: var(--accent);
+}
+
+.slide-dot {
+  pointer-events: auto;
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(41, 36, 31, 0.22);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  outline: none;
+  position: relative;
+}
+
+.slide-dot::after {
+  content: '';
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  left: -5px;
+  right: -5px;
+}
+
+.slide-dot:hover {
+  background: rgba(41, 36, 31, 0.5);
+  transform: scale(1.15);
+}
+
+.slide-dot.is-on {
+  background: var(--accent, #78634e);
+  width: 16px;
+  border-radius: 999px;
+}
+
+.product-card-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(245, 238, 232, 0.92);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: var(--text, #29241f);
+  border: 1px solid rgba(41, 36, 31, 0.1);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  z-index: 4;
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgba(41, 36, 31, 0.08);
+  padding: 0;
+}
+
+.product-card-arrow:hover {
+  background: #ffffff;
+  color: var(--text, #29241f);
+  box-shadow: 0 4px 12px rgba(41, 36, 31, 0.15);
+  transform: translateY(-50%) scale(1.05);
+}
+
+.product-card-arrow.is-prev {
+  left: 8px;
+}
+
+.product-card-arrow.is-next {
+  right: 8px;
+}
+
+.product-card figure:hover .product-card-arrow {
+  opacity: 1;
+}
+
+@media (max-width: 1024px), (hover: none) {
+  .product-card-arrow {
+    opacity: 0.85;
+    width: 28px;
+    height: 28px;
+  }
 }
 
 .wish {
@@ -1842,3 +1957,133 @@ select {
   color: var(--text);
 }
 
+
+
+/* ============================================================================
+   COUCHKRAFT PDP ACTION BUTTONS DESIGN SYSTEM
+   ============================================================================ */
+.pdp-action-group {
+  margin-top: 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.pdp-primary-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
+  align-items: stretch;
+}
+
+.pdp-secondary-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  align-items: stretch;
+}
+
+.pdp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  height: 48px;
+  padding: 0 1.25rem;
+  border-radius: 999px;
+  font-family: var(--sans);
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  box-sizing: border-box;
+  transition: all 0.22s cubic-bezier(0.2, 0, 0, 1);
+  outline: none;
+}
+
+.pdp-btn-primary {
+  background: #29241f;
+  color: #f7f1ea;
+  border: 1px solid #29241f;
+  box-shadow: 0 2px 6px rgba(41, 36, 31, 0.08);
+}
+
+.pdp-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover, #5e4b39);
+  border-color: var(--accent-hover, #5e4b39);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(41, 36, 31, 0.16);
+}
+
+.pdp-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.pdp-btn-save {
+  background: #ffffff;
+  color: var(--text, #29241f);
+  border: 1px solid var(--line, #e5dbd1);
+  min-width: 96px;
+}
+
+.pdp-btn-save:hover {
+  background: var(--canvas-2, #f0e6de);
+  border-color: var(--accent, #78634e);
+  color: var(--accent, #78634e);
+  transform: translateY(-1px);
+}
+
+.pdp-btn-save.is-saved {
+  background: color-mix(in srgb, var(--accent, #78634e) 10%, #fff);
+  border-color: var(--accent, #78634e);
+  color: var(--accent, #78634e);
+}
+
+.pdp-btn-commission {
+  background: #ffffff;
+  color: var(--accent, #78634e);
+  border: 1px solid var(--line, #e5dbd1);
+}
+
+.pdp-btn-commission:hover {
+  background: color-mix(in srgb, var(--accent, #78634e) 8%, #ffffff);
+  border-color: var(--accent, #78634e);
+  color: var(--accent-hover, #5e4b39);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(120, 99, 78, 0.08);
+}
+
+.pdp-btn-whatsapp {
+  background: #38312b;
+  color: #f5eee8;
+  border: 1px solid #38312b;
+  box-shadow: 0 2px 6px rgba(41, 36, 31, 0.08);
+}
+
+.pdp-btn-whatsapp:hover {
+  background: #25201b;
+  border-color: #25201b;
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(41, 36, 31, 0.18);
+}
+
+.pdp-btn:focus-visible {
+  outline: 2px solid var(--accent, #78634e);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .pdp-primary-row {
+    grid-template-columns: 1fr;
+  }
+  .pdp-secondary-row {
+    grid-template-columns: 1fr;
+  }
+}

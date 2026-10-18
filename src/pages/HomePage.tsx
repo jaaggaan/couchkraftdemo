@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
+import { useStore } from '../context/StoreContext'
 import { Link } from 'react-router-dom'
-import { collectionTabs, products, type CollectionTab } from '../data/products'
+import { collectionTabs, type CollectionTab } from '../data/products'
 import { lifestyle, spaces } from '../data/site'
 import { ProductGrid } from '../components/ProductCard'
 import { ArrowIcon } from '../components/Icons'
@@ -8,8 +9,9 @@ import { HeroSlider } from '../components/HeroSlider'
 
 export function HomePage() {
   const [tab, setTab] = useState<CollectionTab>('bestsellers')
-  const items = useMemo(() => products.filter((product) => product.tabs.includes(tab)).slice(0, 6), [tab])
-  const overlayProduct = products.find((product) => product.slug === 'theo-oak-chair') ?? products[6]
+  const { products: liveProducts } = useStore()
+  const items = useMemo(() => liveProducts.filter((product) => product.tabs.includes(tab)).slice(0, 6), [tab, liveProducts])
+  const overlayProduct = liveProducts.find((product) => product.slug === 'theo-oak-chair') ?? liveProducts[0]
   const [email, setEmail] = useState('')
   const [note, setNote] = useState('')
 

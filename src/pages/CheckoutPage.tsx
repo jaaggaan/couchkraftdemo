@@ -114,7 +114,7 @@ export function CheckoutPage() {
     setFormError('')
     setStatus('Preparing your payment…')
     const session = await checkoutApi.session({
-      items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity, finish: item.finish })),
+      items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity, finish: item.finish, customization: item.customization })),
       coupon,
       addressId: addressId || undefined,
       name,
@@ -319,16 +319,26 @@ export function CheckoutPage() {
         <aside className="checkout-summary">
           <h2>Order summary</h2>
           <ul className="checkout-lines">
-            {lines.map(({ product, quantity, finish }) => (
-              <li key={product.id}>
+            {lines.map(({ product, quantity, finish, customization, unitPrice }: any) => (
+              <li key={product.id + (finish || '') + JSON.stringify(customization || {})}>
                 <img src={product.images[0]} alt="" />
                 <div>
                   <strong>{product.name}</strong>
                   <p className="form-note">
                     {finish} · Qty {quantity}
                   </p>
+                  {customization && (
+                    <p className="form-note" style={{ color: '#835022', fontSize: 11, marginTop: 2 }}>
+                      {[
+                        customization.seating,
+                        customization.width ? `${customization.width}×${customization.depth}×${customization.height}${customization.dimensionUnit || 'cm'}` : null,
+                        customization.fabric,
+                        customization.color,
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
                 </div>
-                <span>{formatPrice(product.price * quantity)}</span>
+                <span>{formatPrice((unitPrice || product.price) * quantity)}</span>
               </li>
             ))}
           </ul>

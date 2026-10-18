@@ -1,13 +1,6 @@
-// server/auth-middleware.ts
-import { createHmac as createHmac2 } from "node:crypto";
-import bcrypt2 from "bcryptjs";
-import jwt from "jsonwebtoken";
-
-// server/auth-store.ts
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+// server/settings-store.ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolve2 } from "node:path";
-import bcrypt from "bcryptjs";
 
 // server/data-path.ts
 import { tmpdir } from "node:os";
@@ -17,148 +10,302 @@ function dataDirectory() {
   return resolve(process.cwd(), "data");
 }
 
-// server/auth-store.ts
+// server/supabase-client.ts
+import { createClient } from "@supabase/supabase-js";
+var SUPABASE_URL = process.env.SUPABASE_URL || "https://qzpnxxlwlphxdcdlbiph.supabase.co";
+var SUPABASE_KEY = process.env.SUPABASE_KEY || "sb_publishable_BfUf7XGJyrvhltzbKfq5Zg_zf_EFmnw";
+var supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// server/settings-store.ts
 var dataDir = dataDirectory();
-var storePath = resolve2(dataDir, "customers.json");
-function ensureStore() {
+var settingsFile = resolve2(dataDir, "settings.json");
+var defaultSettings = {
+  whatsapp: {
+    businessPhone: "+91 63607 04340",
+    businessName: "CouchKraft Bespoke Concierge",
+    enabled: true,
+    conciergeEmail: "concierge@couchkraft.in",
+    workingHours: "Mon - Sat: 10:00 AM - 7:00 PM IST",
+    defaultLeadTimeWeeks: 4
+  }
+};
+function ensureSettingsFile() {
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
-  if (!existsSync(storePath)) writeFileSync(storePath, "[]", "utf8");
+  if (!existsSync(settingsFile)) {
+    writeFileSync(settingsFile, JSON.stringify(defaultSettings, null, 2), "utf8");
+  }
 }
-function readAll() {
-  ensureStore();
+function readSettings() {
+  ensureSettingsFile();
   try {
-    const rows = JSON.parse(readFileSync(storePath, "utf8"));
-    return rows.map((customer) => ({ ...customer, addresses: customer.addresses ?? [] }));
+    const raw = readFileSync(settingsFile, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      whatsapp: {
+        ...defaultSettings.whatsapp,
+        ...parsed.whatsapp || {}
+      }
+    };
+  } catch {
+    return defaultSettings;
+  }
+}
+function writeSettings(settings) {
+  ensureSettingsFile();
+  writeFileSync(settingsFile, JSON.stringify(settings, null, 2), "utf8");
+  try {
+    Promise.resolve(
+      supabase.from("store_settings").upsert([{ key: "whatsapp", value: settings.whatsapp, updated_at: (/* @__PURE__ */ new Date()).toISOString() }], { onConflict: "key" })
+    ).then((res) => {
+      if (res?.error) console.warn("[Supabase Settings Sync Notice]:", res.error.message);
+      else console.log("[Supabase Settings Synced]: WhatsApp configuration saved.");
+    }).catch((err) => console.warn("[Supabase Settings Sync Catch]:", err));
+  } catch (err) {
+    console.warn("[Supabase Settings Catch]:", err);
+  }
+  return settings;
+}
+async function fetchLiveSettings() {
+  const local = readSettings();
+  try {
+    const { data, error } = await supabase.from("store_settings").select("*").eq("key", "whatsapp").maybeSingle();
+    if (!error && data && data.value) {
+      const merged = {
+        whatsapp: {
+          ...local.whatsapp,
+          ...data.value
+        }
+      };
+      writeFileSync(settingsFile, JSON.stringify(merged, null, 2), "utf8");
+      return merged;
+    }
+  } catch {
+  }
+  return local;
+}
+
+// server/custom-request-store.ts
+import { randomBytes } from "node:crypto";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { resolve as resolve3 } from "node:path";
+var dataDir2 = dataDirectory();
+var requestsFile = resolve3(dataDir2, "custom_requests.json");
+function ensureRequestsFile() {
+  if (!existsSync2(dataDir2)) mkdirSync2(dataDir2, { recursive: true });
+  if (!existsSync2(requestsFile)) {
+    writeFileSync2(requestsFile, JSON.stringify([], null, 2), "utf8");
+  }
+}
+function readCustomRequests() {
+  ensureRequestsFile();
+  try {
+    const raw = readFileSync2(requestsFile, "utf8");
+    return JSON.parse(raw);
   } catch {
     return [];
   }
 }
-function writeAll(customers) {
-  ensureStore();
-  writeFileSync(storePath, JSON.stringify(customers, null, 2), "utf8");
+function writeCustomRequests(items) {
+  ensureRequestsFile();
+  writeFileSync2(requestsFile, JSON.stringify(items, null, 2), "utf8");
 }
-function hashToken(token) {
-  return createHash("sha256").update(token).digest("hex");
-}
-function newToken() {
-  return randomBytes(32).toString("hex");
-}
-function tokensMatch(token, hash) {
-  if (!hash) return false;
-  const left = Buffer.from(hashToken(token));
-  const right = Buffer.from(hash);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-function findByEmail(email) {
-  return readAll().find((customer) => customer.email === email.toLowerCase().trim()) ?? null;
-}
-function findById(id) {
-  return readAll().find((customer) => customer.id === id) ?? null;
-}
-function publicCustomer(customer) {
-  return {
-    id: customer.id,
-    name: customer.name,
-    email: customer.email,
-    phone: customer.phone,
-    emailVerified: customer.emailVerified
+async function createCustomRequest(input) {
+  const requests = readCustomRequests();
+  const id = `CK-REQ-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString("hex").toUpperCase()}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const newReq = {
+    id,
+    customerId: input.customerId || null,
+    customerName: String(input.customerName || "Anonymous Client").trim(),
+    customerEmail: String(input.customerEmail || "").trim(),
+    customerPhone: String(input.customerPhone || "").trim(),
+    productId: input.productId || void 0,
+    productName: input.productName || void 0,
+    productUrl: input.productUrl || void 0,
+    seatingCapacity: input.seatingCapacity || void 0,
+    dimensions: input.dimensions || {},
+    material: input.material || void 0,
+    fabric: input.fabric || void 0,
+    color: input.color || void 0,
+    budget: input.budget || void 0,
+    notes: input.notes || void 0,
+    status: "new",
+    adminNotes: "",
+    createdAt: now,
+    updatedAt: now
   };
-}
-async function createCustomer(input) {
-  const customers = readAll();
-  const email = input.email.toLowerCase().trim();
-  if (customers.some((customer2) => customer2.email === email)) {
-    return { error: "duplicate" };
+  requests.unshift(newReq);
+  writeCustomRequests(requests);
+  try {
+    const dbRow = {
+      id: newReq.id,
+      customer_id: newReq.customerId,
+      customer_name: newReq.customerName,
+      customer_email: newReq.customerEmail,
+      customer_phone: newReq.customerPhone,
+      product_id: newReq.productId,
+      product_name: newReq.productName,
+      product_url: newReq.productUrl,
+      seating_capacity: newReq.seatingCapacity,
+      dimensions: newReq.dimensions,
+      material: newReq.material,
+      fabric: newReq.fabric,
+      color: newReq.color,
+      budget: newReq.budget,
+      notes: newReq.notes,
+      status: newReq.status,
+      admin_notes: newReq.adminNotes,
+      created_at: newReq.createdAt,
+      updated_at: newReq.updatedAt
+    };
+    Promise.resolve(
+      supabase.from("custom_requests").insert([dbRow])
+    ).then((res) => {
+      if (res?.error) console.warn("[Supabase Custom Request Insert Notice]:", res.error.message);
+      else console.log(`[Supabase Custom Request Synced]: ${newReq.id}`);
+    }).catch((err) => console.warn("[Supabase Custom Request Error]:", err));
+  } catch (err) {
+    console.warn("[Supabase Custom Request Exception]:", err);
   }
-  const verifyToken = newToken();
-  const customer = {
-    id: randomBytes(12).toString("hex"),
-    name: input.name.trim(),
-    email,
-    phone: input.phone.trim(),
-    passwordHash: await bcrypt.hash(input.password, 12),
-    emailVerified: false,
-    verifyTokenHash: hashToken(verifyToken),
-    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24,
-    resetTokenHash: null,
-    resetExpires: null,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    addresses: []
+  return newReq;
+}
+async function updateCustomRequestStatus(id, updates) {
+  const requests = readCustomRequests();
+  const idx = requests.findIndex((r) => r.id === id);
+  if (idx === -1) return null;
+  const existing = requests[idx];
+  const updated = {
+    ...existing,
+    ...updates,
+    id: existing.id,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
-  customers.push(customer);
-  writeAll(customers);
-  return { customer, verifyToken };
-}
-function saveCustomer(updated) {
-  const customers = readAll().map((customer) => customer.id === updated.id ? updated : customer);
-  writeAll(customers);
-}
-function updateProfile(customer, input) {
-  const email = input.email.toLowerCase().trim();
-  const taken = findByEmail(email);
-  if (taken && taken.id !== customer.id) return { error: "duplicate" };
-  const next = {
-    ...customer,
-    name: input.name.trim(),
-    email,
-    phone: input.phone.trim()
-  };
-  saveCustomer(next);
-  return { customer: next };
-}
-function issueVerifyToken(customer) {
-  const verifyToken = newToken();
-  saveCustomer({
-    ...customer,
-    verifyTokenHash: hashToken(verifyToken),
-    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24
-  });
-  return verifyToken;
-}
-function issueResetToken(customer) {
-  const resetToken = newToken();
-  saveCustomer({
-    ...customer,
-    resetTokenHash: hashToken(resetToken),
-    resetExpires: Date.now() + 1e3 * 60 * 30
-  });
-  return resetToken;
-}
-function findByVerifyToken(token) {
-  return readAll().find((customer) => tokensMatch(token, customer.verifyTokenHash)) ?? null;
-}
-function findByResetToken(token) {
-  return readAll().find((customer) => tokensMatch(token, customer.resetTokenHash)) ?? null;
-}
-async function setPassword(customer, password) {
-  saveCustomer({
-    ...customer,
-    passwordHash: await bcrypt.hash(password, 12),
-    resetTokenHash: null,
-    resetExpires: null
-  });
-}
-function addAddress(customer, input) {
-  const address = { ...input, id: randomBytes(8).toString("hex") };
-  saveCustomer({ ...customer, addresses: [...customer.addresses, address] });
-  return address;
-}
-function updateAddress(customer, addressId, input) {
-  const addresses = customer.addresses.map((address) => address.id === addressId ? { ...input, id: addressId } : address);
-  if (!addresses.some((address) => address.id === addressId)) return null;
-  saveCustomer({ ...customer, addresses });
-  return addresses.find((address) => address.id === addressId) ?? null;
-}
-function removeAddress(customer, addressId) {
-  if (!customer.addresses.some((address) => address.id === addressId)) return false;
-  saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) });
-  return true;
+  requests[idx] = updated;
+  writeCustomRequests(requests);
+  try {
+    supabase.from("custom_requests").update({
+      status: updated.status,
+      admin_notes: updated.adminNotes,
+      updated_at: updated.updatedAt
+    }).eq("id", id).then(({ error }) => {
+      if (error) console.warn("[Supabase Custom Request Update Notice]:", error.message);
+    });
+  } catch {
+  }
+  return updated;
 }
 
-// server/order-store.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { resolve as resolve3 } from "node:path";
+// server/admin-api-handler.ts
+import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync6 } from "node:fs";
+import { resolve as resolve7 } from "node:path";
+import bcrypt2 from "bcryptjs";
+
+// server/admin-store.ts
+import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { resolve as resolve4 } from "node:path";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+var dataDir3 = dataDirectory();
+var adminsPath = resolve4(dataDir3, "admins.json");
+var auditPath = resolve4(dataDir3, "admin-audit.json");
+var ADMIN_SECRET = process.env.COUCHKRAFT_ADMIN_SECRET || "couchkraft-admin-secure-key-2026";
+function ensureStore() {
+  if (!existsSync3(dataDir3)) mkdirSync3(dataDir3, { recursive: true });
+  if (!existsSync3(adminsPath)) {
+    const defaultPasswordHash = bcrypt.hashSync("Admin@CouchKraft2026!", 10);
+    const initialAdmins = [
+      {
+        id: "admin_devang_01",
+        name: "Devang V.",
+        email: "admin@couchkraft.in",
+        role: "owner",
+        avatarUrl: "https://lh3.googleusercontent.com/aida/AEtjO1U-jXIhz33Xm08EzyafM8zL58IucpUMfP_Uh1YjU7Bi3wHrNQLs_txrVhHARZ6fMZPpH69tTPUfE_mPEjtFOE7OihQThW0QwICxknNz6Q7mmF1Nzx-x0RQwMIINjOpPvR3iUbX_vOzhimZkLpt5w2RoZrjMdNWGZ69QaRY6F0GIdBzDlqMCsc051Q9nBcvuMDDddNABcdnl2rGXeKcvFZg2i7uVDpVufulCakZsWBY5gkfz4L1MU8ClZ38C9fWHlAGysG2z9OHbSmQ",
+        passwordHash: defaultPasswordHash,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    ];
+    writeFileSync3(adminsPath, JSON.stringify(initialAdmins, null, 2), "utf8");
+  }
+  if (!existsSync3(auditPath)) {
+    writeFileSync3(auditPath, "[]", "utf8");
+  }
+}
+function readAdmins() {
+  ensureStore();
+  try {
+    return JSON.parse(readFileSync3(adminsPath, "utf8"));
+  } catch {
+    return [];
+  }
+}
+function findAdminByEmail(email) {
+  const admins = readAdmins();
+  return admins.find((a) => a.email.toLowerCase() === email.toLowerCase().trim()) ?? null;
+}
+function findAdminById(id) {
+  const admins = readAdmins();
+  return admins.find((a) => a.id === id) ?? null;
+}
+function publicAdmin(admin) {
+  return {
+    id: admin.id,
+    name: admin.name,
+    email: admin.email,
+    role: admin.role,
+    avatarUrl: admin.avatarUrl,
+    createdAt: admin.createdAt,
+    lastLoginAt: admin.lastLoginAt
+  };
+}
+function signAdminToken(admin) {
+  return jwt.sign(
+    {
+      sub: admin.id,
+      email: admin.email,
+      role: admin.role,
+      name: admin.name,
+      iss: "couchkraft-admin"
+    },
+    ADMIN_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+function verifyAdminToken(token) {
+  try {
+    const payload = jwt.verify(token, ADMIN_SECRET);
+    return findAdminById(payload.sub);
+  } catch {
+    return null;
+  }
+}
+function logAdminAction(entry) {
+  ensureStore();
+  try {
+    const existing = JSON.parse(readFileSync3(auditPath, "utf8"));
+    const newEntry = {
+      ...entry,
+      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    existing.unshift(newEntry);
+    writeFileSync3(auditPath, JSON.stringify(existing.slice(0, 500), null, 2), "utf8");
+  } catch (err) {
+    console.error("Failed to log admin action:", err);
+  }
+}
+function getAuditLogs(limit = 50) {
+  ensureStore();
+  try {
+    const existing = JSON.parse(readFileSync3(auditPath, "utf8"));
+    return existing.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+// server/product-store.ts
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "node:fs";
+import { resolve as resolve5 } from "node:path";
 
 // src/data/products.ts
 var img = (id, w = 1200) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=80`;
@@ -179,7 +326,45 @@ var products = [
       img("photo-1493663284031-b7e3aefcae8e")
     ],
     finishes: ["Cream boucl\xE9", "Warm oat linen"],
-    care: "Vacuum regularly. Professional clean only."
+    care: "Vacuum regularly. Professional clean only.",
+    customizationEnabled: true,
+    customizationOptions: {
+      enabled: true,
+      seatingOptions: [
+        { id: "2-seater", label: "2-Seater (Compact)", priceDelta: -12e3, description: "Width 170cm \xB7 Intimate living spaces" },
+        { id: "3-seater", label: "3-Seater (Standard)", priceDelta: 0, description: "Width 220cm \xB7 Signature proportions" },
+        { id: "4-seater", label: "4-Seater (Grand)", priceDelta: 16e3, description: "Width 270cm \xB7 Expansive lounge silhouette" },
+        { id: "l-shaped", label: "L-Shaped Sectional", priceDelta: 38e3, description: "Width 290cm with left/right chaise lounger" }
+      ],
+      dimensionSpecs: {
+        width: { enabled: true, min: 160, max: 300, step: 5, defaultVal: 220, unit: "cm", pricePerUnitDelta: 150 },
+        depth: { enabled: true, min: 85, max: 110, step: 5, defaultVal: 95, unit: "cm" },
+        height: { enabled: true, min: 75, max: 90, step: 5, defaultVal: 80, unit: "cm" }
+      },
+      fabrics: [
+        { id: "cream-boucle", label: "Heavy Cream Boucl\xE9", priceDelta: 0, description: "Soft textured warmth with high rub count" },
+        { id: "warm-oat-linen", label: "Belgian Linen Blend", priceDelta: 3500, description: "Breathable stonewashed European linen" },
+        { id: "royal-velvet", label: "Deep Moss Velvet", priceDelta: 7e3, description: "Plush stain-resistant architectural velvet" },
+        { id: "italian-leather", label: "Cognac Full-Grain Leather", priceDelta: 32e3, description: "Hand-burnished Italian aniline leather" }
+      ],
+      colors: [
+        { id: "ivory", label: "Warm Ivory", swatchHex: "#E8DFC9", priceDelta: 0 },
+        { id: "terracotta", label: "Terracotta Rust", swatchHex: "#B35438", priceDelta: 0 },
+        { id: "moss", label: "Olive Moss", swatchHex: "#5D6B57", priceDelta: 0 },
+        { id: "taupe", label: "Muted Taupe", swatchHex: "#9C8F84", priceDelta: 0 },
+        { id: "charcoal", label: "Charcoal Slate", swatchHex: "#36393F", priceDelta: 0 }
+      ],
+      finishes: [
+        { id: "nat-oak", label: "Natural White Oak", priceDelta: 0 },
+        { id: "walnut", label: "Dark American Walnut", priceDelta: 3e3 },
+        { id: "smoked-ash", label: "Smoked Ebonized Ash", priceDelta: 4500 }
+      ],
+      materials: [
+        { id: "teak-frame", label: "Kiln-Dried Teak Wood Frame", priceDelta: 0 },
+        { id: "sheesham-frame", label: "Seasoned Sheesham Hardwood", priceDelta: -4e3 }
+      ],
+      notesPlaceholder: "E.g. Chaise on right-hand side, firmer 40-density seat foam..."
+    }
   },
   {
     id: "ck-luma-chair",
@@ -197,7 +382,38 @@ var products = [
       img("photo-1544457070-4cd773b4d71e")
     ],
     finishes: ["Natural oak", "Walnut stain"],
-    care: "Dust the frame with a dry cloth. Keep out of prolonged direct sun."
+    care: "Dust the frame with a dry cloth. Keep out of prolonged direct sun.",
+    customizationEnabled: true,
+    customizationOptions: {
+      enabled: true,
+      seatingOptions: [
+        { id: "single", label: "Standard Lounge Chair", priceDelta: 0 },
+        { id: "with-ottoman", label: "Chair + Matching Footstool Ottoman", priceDelta: 14e3 }
+      ],
+      dimensionSpecs: {
+        width: { enabled: true, min: 70, max: 95, step: 5, defaultVal: 80, unit: "cm" },
+        depth: { enabled: true, min: 75, max: 95, step: 5, defaultVal: 85, unit: "cm" },
+        height: { enabled: true, min: 75, max: 90, step: 5, defaultVal: 82, unit: "cm" }
+      },
+      fabrics: [
+        { id: "textured-boucle", label: "Textured Boucl\xE9", priceDelta: 0 },
+        { id: "belgian-linen", label: "Belgian Linen", priceDelta: 2500 },
+        { id: "aniline-leather", label: "Tan Saddle Leather", priceDelta: 12e3 }
+      ],
+      colors: [
+        { id: "natural-oat", label: "Natural Oat", swatchHex: "#E5D3B3", priceDelta: 0 },
+        { id: "amber-rust", label: "Amber Rust", swatchHex: "#C06C47", priceDelta: 0 },
+        { id: "sage-green", label: "Forest Sage", swatchHex: "#4A5B4E", priceDelta: 0 }
+      ],
+      finishes: [
+        { id: "natural-oak", label: "Natural Oak Frame", priceDelta: 0 },
+        { id: "walnut-stain", label: "Walnut Stain Frame", priceDelta: 1800 }
+      ],
+      materials: [
+        { id: "oak-wood", label: "Solid White Oak", priceDelta: 0 },
+        { id: "teak-wood", label: "Burma Teak Hardwood", priceDelta: 4500 }
+      ]
+    }
   },
   {
     id: "ck-nordic-sideboard",
@@ -346,6 +562,1045 @@ var products = [
   }
 ];
 
+// server/product-store.ts
+var dataDir4 = dataDirectory();
+var productsPath = resolve5(dataDir4, "products.json");
+var categoriesPath = resolve5(dataDir4, "categories.json");
+var initialCategories = [
+  {
+    id: "cat_sofas",
+    name: "Living Room > Sofas & Couches",
+    slug: "sofas-and-couches",
+    subClassifications: ["3-Seater Sofas", "Sectionals & L-Shapes", "Chesterfield Sofas", "Modular Loungers"],
+    description: "Artisanal sofas crafted from kiln-dried hardwood and organic Belgian fabrics.",
+    image: "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=600&q=80",
+    productCount: 1
+  },
+  {
+    id: "cat_chairs",
+    name: "Bedroom > Lounge Chairs",
+    slug: "lounge-chairs",
+    subClassifications: ["Accent Chairs", "Recliners", "Rocking Chairs"],
+    description: "Sculptural seating designed for quiet reading and relaxed conversation.",
+    image: "https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=600&q=80",
+    productCount: 1
+  },
+  {
+    id: "cat_storage",
+    name: "Dining > Benches & Storage",
+    slug: "benches-and-storage",
+    subClassifications: ["Sideboards", "Credenzas", "Dining Benches"],
+    description: "Minimalist wooden storage units with architectural proportions.",
+    image: "https://images.unsplash.com/photo-1611967164521-abae8fba4668?auto=format&fit=crop&w=600&q=80",
+    productCount: 1
+  },
+  {
+    id: "cat_accent",
+    name: "Study > Accent Seating",
+    slug: "accent-seating",
+    subClassifications: ["Daybeds", "Ottomans", "Chaise Lounges"],
+    description: "Versatile handcrafted accent daybeds and sloped seating.",
+    image: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=600&q=80",
+    productCount: 1
+  }
+];
+function ensureStore2() {
+  if (!existsSync4(dataDir4)) mkdirSync4(dataDir4, { recursive: true });
+  if (!existsSync4(categoriesPath)) {
+    writeFileSync4(categoriesPath, JSON.stringify(initialCategories, null, 2), "utf8");
+  }
+  if (!existsSync4(productsPath)) {
+    const seeded = products.map((p, idx) => {
+      const isArden = p.id === "ck-arden-sofa";
+      return {
+        ...p,
+        sku: isArden ? "CK-SOF-001" : `CK-PRD-${String(idx + 1).padStart(3, "0")}`,
+        price: isArden ? 78e3 : p.price,
+        compareAt: isArden ? 95e3 : Math.round(p.price * 1.2),
+        gstSlab: "18% GST (Standard Furniture)",
+        hsnCode: "9403 6000",
+        subCategory: isArden ? "3-Seater Sofas" : "Standard",
+        shortExcerpt: isArden ? "Clean mid-century lines wrapped in natural woven textures. Ergonomic sloped cushions sculpted over sustainably sourced teakwood." : p.description.slice(0, 140),
+        description: isArden ? "The Arden Sofa embodies our philosophy of quiet luxury. Engineered for longevity, the structure integrates hand-carved kiln-dried teakwood arms with a supportive serpentine spring assembly. The cushions are enveloped in Belgian-milled linen blend fabric, resistant to piling and softly textured to the touch.\n\nEvery silhouette line is smoothed to architectural perfection, delivering a calm presence in both light-drenched contemporary apartments and storied traditional residences." : p.description,
+        videoUrl: isArden ? "https://youtube.com/watch?v=couchkraft-arden-craft" : "",
+        colorSwatches: isArden ? [
+          { name: "Terracotta Rust", hex: "#B35438", skuCode: "SKU-TRC", active: true },
+          { name: "Warm Ivory", hex: "#E8DFC9", skuCode: "SKU-WIV", active: true },
+          { name: "Olive Green", hex: "#5D6B57", skuCode: "SKU-OLV", active: true },
+          { name: "Muted Taupe", hex: "#9C8F84", skuCode: "SKU-MTP", active: true }
+        ] : [
+          { name: "Natural Oak", hex: "#D2B48C", skuCode: "SKU-NAT", active: true },
+          { name: "Warm Oat", hex: "#E5D3B3", skuCode: "SKU-OAT", active: true }
+        ],
+        dimensions: isArden ? { width: 215, depth: 92, height: 84, seatHeight: 44 } : { width: 180, depth: 85, height: 80, seatHeight: 42 },
+        netWeight: isArden ? "58 kg" : "45 kg",
+        seatingCapacity: isArden ? "3 Persons (Max 360 kg)" : "2 Persons",
+        warranty: "5 Years Structural Frame",
+        structuralWood: "Kiln-dried Teak & Sheesham Hardwood",
+        foamUpholstery: "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+        readyToShipStock: isArden ? 8 : 4,
+        lowStockThreshold: 2,
+        madeToOrder: true,
+        leadTimeWeeks: 3,
+        customizationEnabled: true,
+        customizationToleranceCm: 15,
+        allowComUpholstery: true,
+        metaTitle: isArden ? "Arden Three-Seater Sofa | CouchKraft Bespoke Teak Living" : `${p.name} | CouchKraft Artisanal Furniture`,
+        metaDescription: isArden ? "Buy the handcrafted Arden Three-Seater Sofa at CouchKraft. Solid kiln-dried teakwood frame wrapped in organic linen upholstery. Handcrafted in India with white-glove delivery." : p.description,
+        status: "published",
+        unitsSold: isArden ? 24 : 12,
+        revenue: isArden ? 1872e3 : 504e3,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+    });
+    writeFileSync4(productsPath, JSON.stringify(seeded, null, 2), "utf8");
+  }
+}
+function readProducts() {
+  ensureStore2();
+  try {
+    return JSON.parse(readFileSync4(productsPath, "utf8"));
+  } catch {
+    return [];
+  }
+}
+function writeProducts(products2) {
+  ensureStore2();
+  writeFileSync4(productsPath, JSON.stringify(products2, null, 2), "utf8");
+}
+function findProductById(id) {
+  const products2 = readProducts();
+  return products2.find((p) => p.id === id || p.slug === id) ?? null;
+}
+function createProduct(input) {
+  const products2 = readProducts();
+  const slug = (input.slug || input.name || "product").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const id = input.id || `ck-${slug}-${Date.now().toString(36)}`;
+  const newProduct = {
+    id,
+    slug,
+    name: input.name || "Untitled Product",
+    sku: input.sku || `CK-GEN-${Date.now().toString(36).toUpperCase()}`,
+    price: Number(input.price) || 0,
+    compareAt: Number(input.compareAt) || Math.round((Number(input.price) || 0) * 1.2),
+    gstSlab: input.gstSlab || "18% GST (Standard Furniture)",
+    hsnCode: input.hsnCode || "9403 6000",
+    description: input.description || "",
+    shortExcerpt: input.shortExcerpt || "",
+    category: input.category || "Living Room > Sofas & Couches",
+    subCategory: input.subCategory || "General",
+    space: input.space || "living",
+    tabs: input.tabs || ["bestsellers", "new"],
+    images: input.images && input.images.length ? input.images : [
+      "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=1200&q=80"
+    ],
+    videoUrl: input.videoUrl || "",
+    finishes: input.finishes || ["Standard"],
+    colorSwatches: input.colorSwatches || [
+      { name: "Terracotta Rust", hex: "#B35438", skuCode: "SKU-TRC", active: true },
+      { name: "Warm Ivory", hex: "#E8DFC9", skuCode: "SKU-WIV", active: true }
+    ],
+    care: input.care || "Vacuum gently with soft brush. Spot clean with dry solvent cleaner.",
+    dimensions: input.dimensions || { width: 200, depth: 90, height: 80, seatHeight: 42 },
+    netWeight: input.netWeight || "50 kg",
+    seatingCapacity: input.seatingCapacity || "3 Persons",
+    warranty: input.warranty || "5 Years Structural Frame",
+    structuralWood: input.structuralWood || "Kiln-dried Teak & Sheesham Hardwood",
+    foamUpholstery: input.foamUpholstery || "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    readyToShipStock: Number(input.readyToShipStock) || 0,
+    lowStockThreshold: Number(input.lowStockThreshold) || 2,
+    madeToOrder: input.madeToOrder ?? true,
+    leadTimeWeeks: Number(input.leadTimeWeeks) || 3,
+    customizationEnabled: input.customizationEnabled ?? true,
+    customizationOptions: input.customizationOptions || void 0,
+    customizationToleranceCm: Number(input.customizationToleranceCm) || 15,
+    allowComUpholstery: input.allowComUpholstery ?? true,
+    metaTitle: input.metaTitle || `${input.name || "Piece"} | CouchKraft`,
+    metaDescription: input.metaDescription || (input.shortExcerpt || input.description || "").slice(0, 160),
+    status: input.status || "published",
+    unitsSold: Number(input.unitsSold) || 0,
+    revenue: Number(input.revenue) || 0,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  products2.unshift(newProduct);
+  writeProducts(products2);
+  return newProduct;
+}
+function updateProduct(id, updates) {
+  const products2 = readProducts();
+  const idx = products2.findIndex((p) => p.id === id || p.slug === id);
+  if (idx === -1) return null;
+  const existing = products2[idx];
+  const updated = {
+    ...existing,
+    ...updates,
+    id: existing.id,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  products2[idx] = updated;
+  writeProducts(products2);
+  return updated;
+}
+function deleteProduct(id) {
+  const products2 = readProducts();
+  const filtered = products2.filter((p) => p.id !== id && p.slug !== id);
+  if (filtered.length === products2.length) return false;
+  writeProducts(filtered);
+  return true;
+}
+function readCategories() {
+  ensureStore2();
+  try {
+    const categories = JSON.parse(readFileSync4(categoriesPath, "utf8"));
+    const products2 = readProducts();
+    return categories.map((cat) => ({
+      ...cat,
+      productCount: products2.filter((p) => p.category === cat.name || p.category.includes(cat.name.split(">")[0].trim())).length
+    }));
+  } catch {
+    return [];
+  }
+}
+function writeCategories(categories) {
+  ensureStore2();
+  writeFileSync4(categoriesPath, JSON.stringify(categories, null, 2), "utf8");
+}
+function createCategory(input) {
+  const categories = readCategories();
+  const slug = (input.slug || input.name || "category").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-");
+  const newCat = {
+    id: input.id || `cat_${Date.now()}`,
+    name: input.name || "New Category",
+    slug,
+    subClassifications: input.subClassifications || [],
+    description: input.description || "",
+    image: input.image || "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=600&q=80",
+    productCount: 0
+  };
+  categories.push(newCat);
+  writeCategories(categories);
+  return newCat;
+}
+function updateCategory(id, updates) {
+  const categories = readCategories();
+  const idx = categories.findIndex((c) => c.id === id || c.slug === id);
+  if (idx === -1) return null;
+  categories[idx] = { ...categories[idx], ...updates, id: categories[idx].id };
+  writeCategories(categories);
+  return categories[idx];
+}
+function deleteCategory(id) {
+  const categories = readCategories();
+  const filtered = categories.filter((c) => c.id !== id && c.slug !== id);
+  if (filtered.length === categories.length) return false;
+  writeCategories(filtered);
+  return true;
+}
+
+// server/marketing-store.ts
+import { existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync5 } from "node:fs";
+import { resolve as resolve6 } from "node:path";
+var dataDir5 = dataDirectory();
+var couponsPath = resolve6(dataDir5, "coupons.json");
+var bannersPath = resolve6(dataDir5, "banners.json");
+var initialCoupons = [
+  {
+    id: "coup_warm10",
+    code: "WARM10",
+    type: "percent",
+    value: 10,
+    minOrderValue: 2e4,
+    maxDiscount: 15e3,
+    startDate: (/* @__PURE__ */ new Date()).toISOString(),
+    endDate: new Date(Date.now() + 90 * 24 * 3600 * 1e3).toISOString(),
+    usageLimit: 500,
+    usedCount: 38,
+    active: true,
+    description: "10% off on all living and lounge handcrafted silhouettes.",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  },
+  {
+    id: "coup_festive15",
+    code: "FESTIVE15",
+    type: "percent",
+    value: 15,
+    minOrderValue: 5e4,
+    maxDiscount: 25e3,
+    startDate: (/* @__PURE__ */ new Date()).toISOString(),
+    endDate: new Date(Date.now() + 30 * 24 * 3600 * 1e3).toISOString(),
+    usageLimit: 200,
+    usedCount: 14,
+    active: true,
+    description: "Special Diwali & Festive season tier discount.",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  },
+  {
+    id: "coup_welcome5k",
+    code: "WELCOME5000",
+    type: "flat",
+    value: 5e3,
+    minOrderValue: 75e3,
+    startDate: (/* @__PURE__ */ new Date()).toISOString(),
+    endDate: new Date(Date.now() + 180 * 24 * 3600 * 1e3).toISOString(),
+    usageLimit: 1e3,
+    usedCount: 82,
+    active: true,
+    description: "\u20B95,000 off on first bespoke order above \u20B975,000.",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  }
+];
+var initialBanners = [
+  {
+    id: "banner_living",
+    title: "In soft sculpture",
+    subtitle: "A quiet oak frame and generous boucl\xE9 contours that belong in a sunlit living room.",
+    desktopImage: "/hero-living-hd.jpg",
+    mobileImage: "/hero-living-scene.jpg",
+    ctaLabel: "Shop the Collection",
+    ctaUrl: "/shop?space=living",
+    badge: "NEW COLLECTION 2026",
+    alignment: "right",
+    tone: "dark",
+    space: "living",
+    active: true,
+    displayOrder: 1,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  },
+  {
+    id: "banner_dining",
+    title: "Gather beautifully",
+    subtitle: "Solid teakwood dining centerpieces engineered for generational memory.",
+    desktopImage: "/hero-dining-hd.jpg",
+    mobileImage: "/hero-dining.jpg",
+    ctaLabel: "Explore Dining",
+    ctaUrl: "/shop?space=dining",
+    badge: "EDITORIAL FEATURE",
+    alignment: "left",
+    tone: "dark",
+    space: "dining",
+    active: true,
+    displayOrder: 2,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  },
+  {
+    id: "banner_lounge",
+    title: "A quieter kind of comfort",
+    subtitle: "Deep sloped seats contoured around sustainably sourced Sheesham wood.",
+    desktopImage: "/hero-lounge-hd.jpg",
+    mobileImage: "/hero-lounge.jpg",
+    ctaLabel: "Discover Lounge",
+    ctaUrl: "/shop?space=lounge",
+    badge: "BESTSELLER",
+    alignment: "right",
+    tone: "dark",
+    space: "lounge",
+    active: true,
+    displayOrder: 3,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  }
+];
+function ensureStore3() {
+  if (!existsSync5(dataDir5)) mkdirSync5(dataDir5, { recursive: true });
+  if (!existsSync5(couponsPath)) {
+    writeFileSync5(couponsPath, JSON.stringify(initialCoupons, null, 2), "utf8");
+  }
+  if (!existsSync5(bannersPath)) {
+    writeFileSync5(bannersPath, JSON.stringify(initialBanners, null, 2), "utf8");
+  }
+}
+function readCoupons() {
+  ensureStore3();
+  try {
+    return JSON.parse(readFileSync5(couponsPath, "utf8"));
+  } catch {
+    return [];
+  }
+}
+function writeCoupons(coupons) {
+  ensureStore3();
+  writeFileSync5(couponsPath, JSON.stringify(coupons, null, 2), "utf8");
+}
+function createCoupon(input) {
+  const coupons = readCoupons();
+  const code = (input.code || "COUPON").toUpperCase().trim().replace(/\s+/g, "");
+  const newCoupon = {
+    id: input.id || `coup_${Date.now()}`,
+    code,
+    type: input.type || "percent",
+    value: Number(input.value) || 10,
+    minOrderValue: Number(input.minOrderValue) || 0,
+    maxDiscount: input.maxDiscount ? Number(input.maxDiscount) : void 0,
+    startDate: input.startDate || (/* @__PURE__ */ new Date()).toISOString(),
+    endDate: input.endDate || new Date(Date.now() + 60 * 24 * 3600 * 1e3).toISOString(),
+    usageLimit: input.usageLimit ? Number(input.usageLimit) : void 0,
+    usedCount: 0,
+    active: input.active ?? true,
+    description: input.description || "",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  coupons.unshift(newCoupon);
+  writeCoupons(coupons);
+  return newCoupon;
+}
+function updateCoupon(id, updates) {
+  const coupons = readCoupons();
+  const idx = coupons.findIndex((c) => c.id === id || c.code.toUpperCase() === id.toUpperCase());
+  if (idx === -1) return null;
+  coupons[idx] = {
+    ...coupons[idx],
+    ...updates,
+    id: coupons[idx].id,
+    code: (updates.code || coupons[idx].code).toUpperCase().trim(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  writeCoupons(coupons);
+  return coupons[idx];
+}
+function deleteCoupon(id) {
+  const coupons = readCoupons();
+  const filtered = coupons.filter((c) => c.id !== id && c.code.toUpperCase() !== id.toUpperCase());
+  if (filtered.length === coupons.length) return false;
+  writeCoupons(filtered);
+  return true;
+}
+function readBanners() {
+  ensureStore3();
+  try {
+    const banners = JSON.parse(readFileSync5(bannersPath, "utf8"));
+    return banners.sort((a, b) => a.displayOrder - b.displayOrder);
+  } catch {
+    return [];
+  }
+}
+function writeBanners(banners) {
+  ensureStore3();
+  writeFileSync5(bannersPath, JSON.stringify(banners, null, 2), "utf8");
+}
+function createBanner(input) {
+  const banners = readBanners();
+  const newBanner = {
+    id: input.id || `banner_${Date.now()}`,
+    title: input.title || "New Banner Headline",
+    subtitle: input.subtitle || "",
+    desktopImage: input.desktopImage || "/hero-living-hd.jpg",
+    mobileImage: input.mobileImage || "/hero-living-scene.jpg",
+    ctaLabel: input.ctaLabel || "Explore Collection",
+    ctaUrl: input.ctaUrl || "/shop",
+    badge: input.badge || "PROMOTIONAL",
+    alignment: input.alignment || "right",
+    tone: input.tone || "dark",
+    space: input.space || "living",
+    active: input.active ?? true,
+    displayOrder: input.displayOrder || banners.length + 1,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  banners.push(newBanner);
+  writeBanners(banners);
+  return newBanner;
+}
+function updateBanner(id, updates) {
+  const banners = readBanners();
+  const idx = banners.findIndex((b) => b.id === id);
+  if (idx === -1) return null;
+  banners[idx] = {
+    ...banners[idx],
+    ...updates,
+    id: banners[idx].id,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  writeBanners(banners);
+  return banners[idx];
+}
+function deleteBanner(id) {
+  const banners = readBanners();
+  const filtered = banners.filter((b) => b.id !== id);
+  if (filtered.length === banners.length) return false;
+  writeBanners(filtered);
+  return true;
+}
+
+// server/admin-api-handler.ts
+var ADMIN_COOKIE = "ck_admin_session";
+function send(res, status, data) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(data));
+  return true;
+}
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key) out[key] = decodeURIComponent(rest.join("="));
+  }
+  return out;
+}
+function cookieFlags() {
+  return process.env.VERCEL ? "HttpOnly; Path=/; SameSite=Lax; Secure" : "HttpOnly; Path=/; SameSite=Lax";
+}
+function setAdminSession(res, token) {
+  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=${token}; ${cookieFlags()}; Max-Age=${60 * 60 * 24 * 7}`);
+}
+function clearAdminSession(res) {
+  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=; ${cookieFlags()}; Max-Age=0`);
+}
+function currentAdmin(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token2 = authHeader.slice(7).trim();
+    const admin = verifyAdminToken(token2);
+    if (admin) return admin;
+  }
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[ADMIN_COOKIE];
+  if (token) {
+    return verifyAdminToken(token);
+  }
+  return null;
+}
+function readAllOrders() {
+  try {
+    const p = resolve7(dataDirectory(), "orders.json");
+    if (existsSync6(p)) {
+      return JSON.parse(readFileSync6(p, "utf8"));
+    }
+  } catch {
+  }
+  return [];
+}
+function writeAllOrders(orders) {
+  const p = resolve7(dataDirectory(), "orders.json");
+  writeFileSync6(p, JSON.stringify(orders, null, 2), "utf8");
+}
+function readAllCustomers() {
+  try {
+    const p = resolve7(dataDirectory(), "customers.json");
+    if (existsSync6(p)) {
+      return JSON.parse(readFileSync6(p, "utf8"));
+    }
+  } catch {
+  }
+  return [];
+}
+async function handleAdminApi(req, res, url, body) {
+  if (req.method === "POST" && url === "/api/admin/auth/login") {
+    const email = String(body.email || "").trim();
+    const password = String(body.password || "");
+    if (!email || !password) {
+      return send(res, 400, { error: "Please enter administrator email and password." });
+    }
+    const admin2 = findAdminByEmail(email);
+    if (!admin2) {
+      return send(res, 401, { error: "Invalid administrator credentials." });
+    }
+    const matches = await bcrypt2.compare(password, admin2.passwordHash);
+    if (!matches) {
+      return send(res, 401, { error: "Invalid administrator credentials." });
+    }
+    const token = signAdminToken(admin2);
+    setAdminSession(res, token);
+    logAdminAction({
+      adminId: admin2.id,
+      adminName: admin2.name,
+      action: "login",
+      targetType: "admin_session",
+      targetId: admin2.id
+    });
+    return send(res, 200, {
+      admin: publicAdmin(admin2),
+      token,
+      message: "Welcome back, " + admin2.name
+    });
+  }
+  if (req.method === "POST" && url === "/api/admin/auth/logout") {
+    clearAdminSession(res);
+    return send(res, 200, { ok: true, message: "Signed out successfully." });
+  }
+  const admin = currentAdmin(req);
+  if (!admin) {
+    return send(res, 401, { error: "Unauthorized. Admin session required." });
+  }
+  if (req.method === "GET" && url === "/api/admin/auth/me") {
+    return send(res, 200, { admin: publicAdmin(admin) });
+  }
+  if (req.method === "GET" && url === "/api/admin/dashboard/stats") {
+    const orders = readAllOrders();
+    const customers = readAllCustomers();
+    const products2 = readProducts();
+    const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const todayOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(todayStr));
+    const todaySales = todayOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+    const thisMonthStr = todayStr.slice(0, 7);
+    const monthOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(thisMonthStr));
+    const monthSales = monthOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+    const totalRevenue = orders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+    const pendingOrders = orders.filter((o) => o.fulfilmentStatus !== "delivered").length;
+    const deliveredOrders = orders.filter((o) => o.fulfilmentStatus === "delivered").length;
+    const lowStockProducts = products2.filter((p) => p.readyToShipStock <= p.lowStockThreshold);
+    return send(res, 200, {
+      todaySales,
+      todayOrdersCount: todayOrders.length,
+      monthlySales: monthSales,
+      totalRevenue,
+      totalOrders: orders.length,
+      pendingOrders,
+      deliveredOrders,
+      customerCount: customers.length,
+      totalProducts: products2.length,
+      lowStockCount: lowStockProducts.length,
+      lowStockProducts: lowStockProducts.slice(0, 5),
+      pendingEnquiriesCount: 3,
+      // Customization inquiries telemetry
+      recentOrders: orders.slice(0, 6),
+      recentAudit: getAuditLogs(5)
+    });
+  }
+  if (req.method === "GET" && url === "/api/admin/products") {
+    const products2 = readProducts();
+    return send(res, 200, { products: products2 });
+  }
+  if (req.method === "POST" && url === "/api/admin/products") {
+    const created = createProduct(body);
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "create_product",
+      targetType: "product",
+      targetId: created.id,
+      details: { name: created.name, sku: created.sku, price: created.price }
+    });
+    return send(res, 201, { product: created, message: "Product created successfully." });
+  }
+  const productMatch = url.match(/^\/api\/admin\/products\/([^/]+)$/);
+  if (productMatch) {
+    const prodId = productMatch[1];
+    if (req.method === "GET") {
+      const prod = findProductById(prodId);
+      if (!prod) return send(res, 404, { error: "Product not found." });
+      return send(res, 200, { product: prod });
+    }
+    if (req.method === "PUT") {
+      const updated = updateProduct(prodId, body);
+      if (!updated) return send(res, 404, { error: "Product not found." });
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: "update_product",
+        targetType: "product",
+        targetId: updated.id,
+        details: { name: updated.name, price: updated.price, status: updated.status }
+      });
+      return send(res, 200, { product: updated, message: "Product updated successfully." });
+    }
+    if (req.method === "DELETE") {
+      const deleted = deleteProduct(prodId);
+      if (!deleted) return send(res, 404, { error: "Product not found." });
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: "delete_product",
+        targetType: "product",
+        targetId: prodId
+      });
+      return send(res, 200, { ok: true, message: "Product removed from catalog." });
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/categories") {
+    return send(res, 200, { categories: readCategories() });
+  }
+  if (req.method === "POST" && url === "/api/admin/categories") {
+    const created = createCategory(body);
+    return send(res, 201, { category: created });
+  }
+  const catMatch = url.match(/^\/api\/admin\/categories\/([^/]+)$/);
+  if (catMatch) {
+    const catId = catMatch[1];
+    if (req.method === "PUT") {
+      const updated = updateCategory(catId, body);
+      if (!updated) return send(res, 404, { error: "Category not found." });
+      return send(res, 200, { category: updated });
+    }
+    if (req.method === "DELETE") {
+      const ok = deleteCategory(catId);
+      if (!ok) return send(res, 404, { error: "Category not found." });
+      return send(res, 200, { ok: true });
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/inventory") {
+    const products2 = readProducts();
+    const inventory = products2.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      category: p.category,
+      readyToShipStock: p.readyToShipStock,
+      lowStockThreshold: p.lowStockThreshold,
+      madeToOrder: p.madeToOrder,
+      leadTimeWeeks: p.leadTimeWeeks,
+      status: p.readyToShipStock <= 0 ? "Out of Stock" : p.readyToShipStock <= p.lowStockThreshold ? "Low Stock" : "In Stock",
+      image: p.images[0] || "",
+      price: p.price
+    }));
+    return send(res, 200, { inventory });
+  }
+  if (req.method === "GET" && url === "/api/admin/coupons") {
+    return send(res, 200, { coupons: readCoupons() });
+  }
+  if (req.method === "POST" && url === "/api/admin/coupons") {
+    const created = createCoupon(body);
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "create_coupon",
+      targetType: "coupon",
+      targetId: created.id,
+      details: { code: created.code, value: created.value, type: created.type }
+    });
+    return send(res, 201, { coupon: created, message: "Coupon created." });
+  }
+  const couponMatch = url.match(/^\/api\/admin\/coupons\/([^/]+)$/);
+  if (couponMatch) {
+    const coupId = couponMatch[1];
+    if (req.method === "PUT") {
+      const updated = updateCoupon(coupId, body);
+      if (!updated) return send(res, 404, { error: "Coupon not found." });
+      return send(res, 200, { coupon: updated, message: "Coupon updated." });
+    }
+    if (req.method === "DELETE") {
+      const ok = deleteCoupon(coupId);
+      if (!ok) return send(res, 404, { error: "Coupon not found." });
+      return send(res, 200, { ok: true, message: "Coupon deleted." });
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/banners") {
+    return send(res, 200, { banners: readBanners() });
+  }
+  if (req.method === "POST" && url === "/api/admin/banners") {
+    const created = createBanner(body);
+    return send(res, 201, { banner: created, message: "Promotional banner added." });
+  }
+  const bannerMatch = url.match(/^\/api\/admin\/banners\/([^/]+)$/);
+  if (bannerMatch) {
+    const bannerId = bannerMatch[1];
+    if (req.method === "PUT") {
+      const updated = updateBanner(bannerId, body);
+      if (!updated) return send(res, 404, { error: "Banner not found." });
+      return send(res, 200, { banner: updated, message: "Banner updated." });
+    }
+    if (req.method === "DELETE") {
+      const ok = deleteBanner(bannerId);
+      if (!ok) return send(res, 404, { error: "Banner not found." });
+      return send(res, 200, { ok: true, message: "Banner removed." });
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/orders") {
+    const orders = readAllOrders();
+    return send(res, 200, { orders });
+  }
+  const orderStatusMatch = url.match(/^\/api\/admin\/orders\/([^/]+)\/status$/);
+  if (orderStatusMatch && req.method === "PUT") {
+    const orderId = orderStatusMatch[1];
+    const orders = readAllOrders();
+    const idx = orders.findIndex((o) => o.id === orderId || o.number === orderId);
+    if (idx === -1) return send(res, 404, { error: "Order not found." });
+    const fulfilmentStatus = String(body.fulfilmentStatus || orders[idx].fulfilmentStatus);
+    const paymentStatus = String(body.paymentStatus || orders[idx].paymentStatus);
+    const trackingNumber = body.trackingNumber !== void 0 ? String(body.trackingNumber) : orders[idx].trackingNumber;
+    orders[idx] = {
+      ...orders[idx],
+      fulfilmentStatus,
+      paymentStatus,
+      trackingNumber
+    };
+    writeAllOrders(orders);
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "update_order_status",
+      targetType: "order",
+      targetId: orders[idx].id,
+      details: { orderNumber: orders[idx].number, fulfilmentStatus, paymentStatus }
+    });
+    return send(res, 200, { order: orders[idx], message: "Order status updated." });
+  }
+  if (req.method === "GET" && url === "/api/admin/customers") {
+    const customers = readAllCustomers();
+    const orders = readAllOrders();
+    const safeCustomers = customers.map((c) => {
+      const customerOrders = orders.filter((o) => o.customerId === c.id);
+      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+      return {
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        emailVerified: c.emailVerified,
+        createdAt: c.createdAt,
+        addressesCount: c.addresses ? c.addresses.length : 0,
+        ordersCount: customerOrders.length,
+        totalSpent
+      };
+    });
+    return send(res, 200, { customers: safeCustomers });
+  }
+  if (req.method === "POST" && url === "/api/admin/upload") {
+    const dataUri = String(body.dataUri || "");
+    const fileName = String(body.fileName || `asset_${Date.now()}.png`).replace(/[^a-zA-Z0-9_.-]/g, "_");
+    if (!dataUri.startsWith("data:image/")) {
+      return send(res, 400, { error: "Invalid image format. Expected base64 data URI." });
+    }
+    const matches = dataUri.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+    if (!matches) {
+      return send(res, 400, { error: "Malformed image data URI." });
+    }
+    const buffer = Buffer.from(matches[2], "base64");
+    if (buffer.length > 10 * 1024 * 1024) {
+      return send(res, 400, { error: "Image exceeds 10MB limit." });
+    }
+    const publicUploads = resolve7(process.cwd(), "public", "uploads");
+    if (!existsSync6(publicUploads)) mkdirSync6(publicUploads, { recursive: true });
+    const finalName = `upload_${Date.now()}_${fileName}`;
+    writeFileSync6(resolve7(publicUploads, finalName), buffer);
+    return send(res, 200, {
+      url: `/uploads/${finalName}`,
+      size: buffer.length,
+      name: finalName
+    });
+  }
+  if (req.method === "GET" && url === "/api/admin/audit") {
+    return send(res, 200, { logs: getAuditLogs(100) });
+  }
+  if (req.method === "GET" && url === "/api/admin/settings") {
+    return send(res, 200, { settings: readSettings() });
+  }
+  if (req.method === "PUT" && url === "/api/admin/settings") {
+    const current = readSettings();
+    const updated = writeSettings({
+      whatsapp: {
+        ...current.whatsapp,
+        ...body.whatsapp || body
+      }
+    });
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "update_settings",
+      targetType: "settings",
+      targetId: "whatsapp",
+      details: { businessPhone: updated.whatsapp.businessPhone }
+    });
+    return send(res, 200, { ok: true, settings: updated, message: "Settings saved successfully." });
+  }
+  if (req.method === "GET" && url === "/api/admin/custom-requests") {
+    return send(res, 200, { requests: readCustomRequests() });
+  }
+  const reqMatch = url.match(/^\/api\/admin\/custom-requests\/([^/]+)$/);
+  if (reqMatch) {
+    const reqId = reqMatch[1];
+    if (req.method === "PUT") {
+      const updated = await updateCustomRequestStatus(reqId, {
+        status: body.status,
+        adminNotes: typeof body.adminNotes === "string" ? body.adminNotes : void 0
+      });
+      if (!updated) return send(res, 404, { error: "Custom request not found." });
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: "update_custom_request",
+        targetType: "custom_request",
+        targetId: reqId,
+        details: { status: updated.status }
+      });
+      return send(res, 200, { ok: true, request: updated, message: "Request status updated." });
+    }
+  }
+  return send(res, 404, { error: "Admin API route not found." });
+}
+
+// server/auth-middleware.ts
+import { createHmac as createHmac2 } from "node:crypto";
+import bcrypt4 from "bcryptjs";
+import jwt2 from "jsonwebtoken";
+
+// server/auth-store.ts
+import { createHash, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
+import { existsSync as existsSync7, mkdirSync as mkdirSync7, readFileSync as readFileSync7, writeFileSync as writeFileSync7 } from "node:fs";
+import { resolve as resolve8 } from "node:path";
+import bcrypt3 from "bcryptjs";
+var dataDir6 = dataDirectory();
+var storePath = resolve8(dataDir6, "customers.json");
+function ensureStore4() {
+  if (!existsSync7(dataDir6)) mkdirSync7(dataDir6, { recursive: true });
+  if (!existsSync7(storePath)) writeFileSync7(storePath, "[]", "utf8");
+}
+function readAll() {
+  ensureStore4();
+  try {
+    const rows = JSON.parse(readFileSync7(storePath, "utf8"));
+    return rows.map((customer) => ({ ...customer, addresses: customer.addresses ?? [] }));
+  } catch {
+    return [];
+  }
+}
+function writeAll(customers) {
+  ensureStore4();
+  writeFileSync7(storePath, JSON.stringify(customers, null, 2), "utf8");
+}
+function hashToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+function newToken() {
+  return randomBytes2(32).toString("hex");
+}
+function tokensMatch(token, hash) {
+  if (!hash) return false;
+  const left = Buffer.from(hashToken(token));
+  const right = Buffer.from(hash);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+function findByEmail(email) {
+  return readAll().find((customer) => customer.email === email.toLowerCase().trim()) ?? null;
+}
+function findById(id) {
+  return readAll().find((customer) => customer.id === id) ?? null;
+}
+function publicCustomer(customer) {
+  return {
+    id: customer.id,
+    name: customer.name,
+    email: customer.email,
+    phone: customer.phone,
+    emailVerified: customer.emailVerified
+  };
+}
+async function createCustomer(input) {
+  const customers = readAll();
+  const email = input.email.toLowerCase().trim();
+  if (customers.some((customer2) => customer2.email === email)) {
+    return { error: "duplicate" };
+  }
+  const verifyToken = newToken();
+  const customer = {
+    id: randomBytes2(12).toString("hex"),
+    name: input.name.trim(),
+    email,
+    phone: input.phone.trim(),
+    passwordHash: await bcrypt3.hash(input.password, 12),
+    emailVerified: false,
+    verifyTokenHash: hashToken(verifyToken),
+    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24,
+    resetTokenHash: null,
+    resetExpires: null,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    addresses: []
+  };
+  customers.push(customer);
+  writeAll(customers);
+  void syncCustomerToSupabase(customer);
+  return { customer, verifyToken };
+}
+function saveCustomer(updated) {
+  const customers = readAll().map((customer) => customer.id === updated.id ? updated : customer);
+  writeAll(customers);
+  void syncCustomerToSupabase(updated);
+}
+function updateProfile(customer, input) {
+  const email = input.email.toLowerCase().trim();
+  const taken = findByEmail(email);
+  if (taken && taken.id !== customer.id) return { error: "duplicate" };
+  const next = {
+    ...customer,
+    name: input.name.trim(),
+    email,
+    phone: input.phone.trim()
+  };
+  saveCustomer(next);
+  return { customer: next };
+}
+function issueVerifyToken(customer) {
+  const verifyToken = newToken();
+  saveCustomer({
+    ...customer,
+    verifyTokenHash: hashToken(verifyToken),
+    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24
+  });
+  return verifyToken;
+}
+function issueResetToken(customer) {
+  const resetToken = newToken();
+  saveCustomer({
+    ...customer,
+    resetTokenHash: hashToken(resetToken),
+    resetExpires: Date.now() + 1e3 * 60 * 30
+  });
+  return resetToken;
+}
+function findByVerifyToken(token) {
+  return readAll().find((customer) => tokensMatch(token, customer.verifyTokenHash)) ?? null;
+}
+function findByResetToken(token) {
+  return readAll().find((customer) => tokensMatch(token, customer.resetTokenHash)) ?? null;
+}
+async function setPassword(customer, password) {
+  saveCustomer({
+    ...customer,
+    passwordHash: await bcrypt3.hash(password, 12),
+    resetTokenHash: null,
+    resetExpires: null
+  });
+}
+function addAddress(customer, input) {
+  const address = { ...input, id: randomBytes2(8).toString("hex") };
+  saveCustomer({ ...customer, addresses: [...customer.addresses, address] });
+  return address;
+}
+function updateAddress(customer, addressId, input) {
+  const addresses = customer.addresses.map((address) => address.id === addressId ? { ...input, id: addressId } : address);
+  if (!addresses.some((address) => address.id === addressId)) return null;
+  saveCustomer({ ...customer, addresses });
+  return addresses.find((address) => address.id === addressId) ?? null;
+}
+function removeAddress(customer, addressId) {
+  if (!customer.addresses.some((address) => address.id === addressId)) return false;
+  saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) });
+  return true;
+}
+async function syncCustomerToSupabase(customer) {
+  try {
+    await supabase.from("customers").upsert([{
+      id: customer.id,
+      name: customer.name,
+      email: customer.email,
+      phone: customer.phone,
+      password_hash: customer.passwordHash,
+      email_verified: customer.emailVerified,
+      verify_token: customer.verifyTokenHash,
+      reset_token: customer.resetTokenHash,
+      reset_expires: customer.resetExpires,
+      addresses: customer.addresses || [],
+      created_at: customer.createdAt
+    }], { onConflict: "id" });
+  } catch (err) {
+    console.warn("[Supabase Customer Sync Warning]:", err);
+  }
+}
+
+// server/order-store.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { existsSync as existsSync8, mkdirSync as mkdirSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync8 } from "node:fs";
+import { resolve as resolve9 } from "node:path";
+
 // src/data/site.ts
 var DEMO_COUPON = {
   code: "WARM10",
@@ -353,16 +1608,16 @@ var DEMO_COUPON = {
 };
 
 // server/order-store.ts
-var dataDir2 = dataDirectory();
-var storePath2 = resolve3(dataDir2, "orders.json");
-function ensureStore2() {
-  if (!existsSync2(dataDir2)) mkdirSync2(dataDir2, { recursive: true });
-  if (!existsSync2(storePath2)) writeFileSync2(storePath2, "[]", "utf8");
+var dataDir7 = dataDirectory();
+var storePath2 = resolve9(dataDir7, "orders.json");
+function ensureStore5() {
+  if (!existsSync8(dataDir7)) mkdirSync8(dataDir7, { recursive: true });
+  if (!existsSync8(storePath2)) writeFileSync8(storePath2, "[]", "utf8");
 }
 function readAll2() {
-  ensureStore2();
+  ensureStore5();
   try {
-    return JSON.parse(readFileSync2(storePath2, "utf8")).map(normaliseOrder);
+    return JSON.parse(readFileSync8(storePath2, "utf8")).map(normaliseOrder);
   } catch {
     return [];
   }
@@ -384,47 +1639,214 @@ function nextTrackingNumber(order) {
   const digits = order.number.replace(/\D/g, "") || "000000";
   return `CKTRK${digits}${order.id.slice(-4).toUpperCase()}`;
 }
-function cartFingerprint(items, coupon, addressKey) {
-  const lines = items.map((item) => `${item.productId}:${item.quantity}:${item.finish || ""}`).sort().join("|");
-  return `${lines}::${(coupon || "").trim().toUpperCase()}::${addressKey}`;
+function cartFingerprint(items, coupon, destination) {
+  const norm = items.map((item) => `${item.productId}:${item.quantity}:${item.finish ?? ""}`).sort().join(";");
+  return `${norm}|${(coupon || "").trim().toUpperCase()}|${destination.trim().toLowerCase()}`;
 }
 function writeAll2(orders) {
-  ensureStore2();
-  writeFileSync2(storePath2, JSON.stringify(orders, null, 2), "utf8");
+  ensureStore5();
+  writeFileSync8(storePath2, JSON.stringify(orders, null, 2), "utf8");
 }
 function listOrdersForCustomer(customerId) {
   return readAll2().filter((order) => order.customerId === customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 function getOrderForCustomer(customerId, orderId) {
-  return listOrdersForCustomer(customerId).find((order) => order.id === orderId) ?? null;
+  const local = listOrdersForCustomer(customerId).find((order) => order.id === orderId);
+  return local ?? null;
 }
 function getOrderByNumberForCustomer(customerId, number) {
-  const normalised = number.trim().toUpperCase();
-  return listOrdersForCustomer(customerId).find((order) => order.number === normalised) ?? null;
+  const cleaned = number.trim().toUpperCase();
+  return listOrdersForCustomer(customerId).find(
+    (order) => order.number.toUpperCase() === cleaned
+  ) ?? null;
 }
-function createOrderFromCart(customerId, input) {
+async function ensureCustomerInSupabase(customerId) {
+  if (!customerId || customerId === "guest") return null;
+  try {
+    const { data: existing } = await supabase.from("customers").select("id").eq("id", customerId).maybeSingle();
+    if (existing?.id) return existing.id;
+    const localUser = findById(customerId);
+    if (localUser) {
+      const { data: inserted, error } = await supabase.from("customers").insert([{
+        id: localUser.id,
+        name: localUser.name,
+        email: localUser.email,
+        phone: localUser.phone || "",
+        password_hash: localUser.passwordHash || "synced_customer",
+        email_verified: localUser.emailVerified ?? true,
+        addresses: localUser.addresses || [],
+        created_at: localUser.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+      }]).select();
+      if (!error && inserted?.[0]) return inserted[0].id;
+    }
+  } catch (err) {
+    console.warn("[Supabase Customer Link Warning]:", err);
+  }
+  return null;
+}
+async function persistOrderToSupabase(order) {
+  try {
+    const validCustomerId = await ensureCustomerInSupabase(order.customerId);
+    const dbOrder = {
+      id: order.id,
+      number: order.number,
+      customer_id: validCustomerId,
+      items: order.items,
+      address: order.shippingAddress,
+      coupon: order.coupon,
+      subtotal: order.subtotal,
+      discount: order.discount,
+      shipping: 0,
+      tax: 0,
+      total: order.total,
+      payment_method: order.paymentMethod || "demo",
+      payment_status: order.paymentStatus || "pending",
+      fulfilment_status: order.fulfilmentStatus || "placed",
+      razorpay_order_id: order.razorpayOrderId,
+      razorpay_payment_id: order.razorpayPaymentId,
+      created_at: order.createdAt,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const { error: oErr } = await supabase.from("orders").upsert([dbOrder], { onConflict: "id" });
+    if (oErr) {
+      console.error("[Supabase Order Upsert Error]:", oErr.message);
+    } else {
+      console.log(`[Supabase Order Saved]: ${order.number} (${order.paymentStatus})`);
+    }
+    if (Array.isArray(order.items) && order.items.length) {
+      const dbItems = order.items.map((it, idx) => ({
+        id: `item_${order.id}_${idx}`,
+        order_id: order.id,
+        product_id: it.productId,
+        quantity: it.quantity,
+        price_at_purchase: it.unitPrice,
+        product_name_snapshot: it.name || "Artisanal Piece",
+        product_sku_snapshot: it.productId || "",
+        variant_details: { finish: it.finish, customization: it.customization }
+      }));
+      const { error: iErr } = await supabase.from("order_items").upsert(dbItems, { onConflict: "id" });
+      if (iErr) {
+        console.warn("[Supabase Order Items Notice]:", iErr.message);
+      }
+    }
+  } catch (err) {
+    console.error("[Supabase Order Sync Exception]:", err);
+  }
+}
+async function decrementPurchasedStock(items) {
+  try {
+    for (const item of items) {
+      const { data: prod } = await supabase.from("products").select("id, ready_to_ship_stock, made_to_order").eq("id", item.productId).maybeSingle();
+      if (prod && !prod.made_to_order) {
+        const currentStock = Number(prod.ready_to_ship_stock) || 0;
+        const newStock = Math.max(0, currentStock - item.quantity);
+        await supabase.from("products").update({ ready_to_ship_stock: newStock }).eq("id", item.productId);
+        console.log(`[Supabase Stock Decremented]: Product ${item.productId} stock updated from ${currentStock} to ${newStock}`);
+      }
+    }
+  } catch (err) {
+    console.warn("[Supabase Stock Decrement Notice]:", err);
+  }
+}
+async function createOrderFromCart(customerId, input) {
+  const { data: dbProducts } = await supabase.from("products").select("*");
+  const liveCatalog = dbProducts && dbProducts.length > 0 ? dbProducts : [];
   const items = [];
   for (const line of input.items) {
-    const product = products.find((entry) => entry.id === line.productId);
-    if (!product || line.quantity < 1) continue;
+    const dbP = liveCatalog.find((entry) => entry.id === line.productId);
+    const fallbackP = products.find((entry) => entry.id === line.productId);
+    const p = dbP || fallbackP;
+    if (!p || line.quantity < 1) continue;
+    const stock = Number(dbP ? dbP.ready_to_ship_stock ?? dbP.readyToShipStock : 10);
+    const isMadeToOrder = Boolean(dbP ? dbP.made_to_order ?? dbP.madeToOrder : true);
+    if (!isMadeToOrder && line.quantity > stock) {
+      return {
+        error: "insufficient_stock",
+        message: `Only ${stock} unit${stock === 1 ? "" : "s"} available in stock for "${p.name}".`
+      };
+    }
+    const basePrice = Number(p.price) || 0;
+    const images = Array.isArray(p.images) ? p.images : [];
+    const finishes = Array.isArray(p.finishes) ? p.finishes : ["Standard"];
+    let itemPrice = basePrice;
+    let validatedCustomization = void 0;
+    if (line.customization && typeof line.customization === "object") {
+      const customConfig = (dbP?.customization_options ?? fallbackP?.customizationOptions) || {};
+      let delta = 0;
+      const c = line.customization;
+      if (c.seating && Array.isArray(customConfig.seatingOptions)) {
+        const found = customConfig.seatingOptions.find((opt) => opt.id === c.seating || opt.label === c.seating);
+        if (found) delta += Number(found.priceDelta) || 0;
+      }
+      if (c.width && customConfig.dimensionSpecs?.width) {
+        const wSpec = customConfig.dimensionSpecs.width;
+        if (wSpec.pricePerUnitDelta && Number(c.width) > wSpec.defaultVal) {
+          const over = Math.max(0, Number(c.width) - wSpec.defaultVal);
+          delta += over * Number(wSpec.pricePerUnitDelta);
+        }
+      }
+      if (c.fabric && Array.isArray(customConfig.fabrics)) {
+        const found = customConfig.fabrics.find((opt) => opt.id === c.fabric || opt.label === c.fabric);
+        if (found) delta += Number(found.priceDelta) || 0;
+      }
+      if (c.color && Array.isArray(customConfig.colors)) {
+        const found = customConfig.colors.find((opt) => opt.id === c.color || opt.label === c.color || opt.name === c.color);
+        if (found) delta += Number(found.priceDelta) || 0;
+      }
+      if (c.finish && Array.isArray(customConfig.finishes)) {
+        const found = customConfig.finishes.find((opt) => opt.id === c.finish || opt.label === c.finish);
+        if (found) delta += Number(found.priceDelta) || 0;
+      }
+      if (c.material && Array.isArray(customConfig.materials)) {
+        const found = customConfig.materials.find((opt) => opt.id === c.material || opt.label === c.material);
+        if (found) delta += Number(found.priceDelta) || 0;
+      }
+      validatedCustomization = {
+        ...c,
+        totalCustomizationDelta: delta
+      };
+      itemPrice = Math.max(0, basePrice + delta);
+    }
     items.push({
-      productId: product.id,
-      name: product.name,
-      slug: product.slug,
-      image: product.images[0],
-      finish: line.finish || product.finishes[0] || "Standard",
-      quantity: Math.min(12, Math.round(line.quantity)),
-      unitPrice: product.price
+      productId: p.id,
+      name: p.name,
+      slug: p.slug,
+      image: images[0] || fallbackP?.images[0] || "/hero-living-hd.jpg",
+      finish: line.finish || finishes[0] || "Standard",
+      quantity: Math.round(line.quantity),
+      unitPrice: itemPrice,
+      customization: validatedCustomization
     });
   }
   if (!items.length) return { error: "empty" };
   const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const coupon = input.coupon?.trim().toUpperCase() === DEMO_COUPON.code ? DEMO_COUPON.code : null;
-  const discount = coupon ? Math.round(subtotal * (DEMO_COUPON.percent / 100)) : 0;
+  let appliedCoupon = null;
+  let discount = 0;
+  if (input.coupon?.trim()) {
+    const code = input.coupon.trim().toUpperCase();
+    const { data: dbCoupons } = await supabase.from("coupons").select("*").eq("active", true);
+    const foundCoupon = dbCoupons?.find((c) => c.code.toUpperCase() === code);
+    if (foundCoupon) {
+      const minVal = Number(foundCoupon.min_order_value) || 0;
+      if (subtotal >= minVal) {
+        appliedCoupon = code;
+        if (foundCoupon.type === "percent") {
+          const calc = Math.round(subtotal * (Number(foundCoupon.value) / 100));
+          discount = foundCoupon.max_discount ? Math.min(calc, Number(foundCoupon.max_discount)) : calc;
+        } else {
+          discount = Math.min(subtotal, Number(foundCoupon.value) || 0);
+        }
+      }
+    } else if (code === DEMO_COUPON.code) {
+      appliedCoupon = DEMO_COUPON.code;
+      discount = Math.round(subtotal * (DEMO_COUPON.percent / 100));
+    }
+  }
+  const coupon = appliedCoupon;
   const total = Math.max(0, subtotal - discount);
   const orders = readAll2();
   const order = {
-    id: randomBytes2(10).toString("hex"),
+    id: randomBytes3(10).toString("hex"),
     number: `CK${String(orders.length + 10841).padStart(6, "0")}`,
     customerId,
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -449,6 +1871,7 @@ function createOrderFromCart(customerId, input) {
   };
   orders.push(order);
   writeAll2(orders);
+  await persistOrderToSupabase(order);
   return { order };
 }
 function findReusableCheckoutOrder(customerId, fingerprint) {
@@ -467,23 +1890,31 @@ function saveOrder(next) {
 function attachRazorpayOrder(orderId, customerId, razorpayOrderId) {
   const order = getOrderForCustomer(customerId, orderId);
   if (!order) return null;
-  return saveOrder({
+  const saved = saveOrder({
     ...order,
     paymentStatus: order.paymentStatus === "paid" ? "paid" : "pending",
     razorpayOrderId,
     paymentError: null
   });
+  if (saved) {
+    void persistOrderToSupabase(saved);
+  }
+  return saved;
 }
 function markOrderPaymentFailed(orderId, customerId, message) {
   const order = getOrderForCustomer(customerId, orderId);
   if (!order || order.paymentStatus === "paid") return order;
-  return saveOrder({
+  const saved = saveOrder({
     ...order,
     paymentStatus: "failed",
     paymentError: message
   });
+  if (saved) {
+    void persistOrderToSupabase(saved);
+  }
+  return saved;
 }
-function markOrderPaid(customerId, input) {
+async function markOrderPaid(customerId, input) {
   const order = getOrderForCustomer(customerId, input.orderId);
   if (!order) return { error: "missing" };
   if (order.razorpayOrderId !== input.razorpayOrderId) return { error: "mismatch" };
@@ -499,9 +1930,11 @@ function markOrderPaid(customerId, input) {
     paymentError: null
   });
   if (!paid) return { error: "missing" };
+  await persistOrderToSupabase(paid);
+  await decrementPurchasedStock(paid.items);
   return { order: paid };
 }
-function markCashOnDelivery(customerId, input) {
+async function markCashOnDelivery(customerId, input) {
   const order = getOrderForCustomer(customerId, input.orderId);
   if (!order) return { error: "missing" };
   if (order.razorpayOrderId !== input.razorpayOrderId) return { error: "mismatch" };
@@ -516,6 +1949,8 @@ function markCashOnDelivery(customerId, input) {
     paymentError: null
   });
   if (!next) return { error: "missing" };
+  await persistOrderToSupabase(next);
+  await decrementPurchasedStock(next.items);
   return { order: next };
 }
 
@@ -589,13 +2024,13 @@ async function readBody(req) {
 function text(body, key) {
   return typeof body[key] === "string" ? body[key] : "";
 }
-function send(res, status, data) {
+function send2(res, status, data) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify(data));
   return true;
 }
-function parseCookies(header) {
+function parseCookies2(header) {
   const out = {};
   if (!header) return out;
   for (const part of header.split(";")) {
@@ -604,24 +2039,24 @@ function parseCookies(header) {
   }
   return out;
 }
-function cookieFlags() {
+function cookieFlags2() {
   return process.env.VERCEL ? "HttpOnly; Path=/; SameSite=Lax; Secure" : "HttpOnly; Path=/; SameSite=Lax";
 }
 function setSession(res, customerId) {
-  const token = jwt.sign({ sub: customerId }, SECRET, { expiresIn: "7d" });
+  const token = jwt2.sign({ sub: customerId }, SECRET, { expiresIn: "7d" });
   res.setHeader(
     "Set-Cookie",
-    `${COOKIE}=${token}; ${cookieFlags()}; Max-Age=${60 * 60 * 24 * 7}`
+    `${COOKIE}=${token}; ${cookieFlags2()}; Max-Age=${60 * 60 * 24 * 7}`
   );
 }
 function clearSession(res) {
-  res.setHeader("Set-Cookie", `${COOKIE}=; ${cookieFlags()}; Max-Age=0`);
+  res.setHeader("Set-Cookie", `${COOKIE}=; ${cookieFlags2()}; Max-Age=0`);
 }
 function currentUser(req) {
-  const token = parseCookies(req.headers.cookie)[COOKIE];
+  const token = parseCookies2(req.headers.cookie)[COOKIE];
   if (!token) return null;
   try {
-    const payload = jwt.verify(token, SECRET);
+    const payload = jwt2.verify(token, SECRET);
     return findById(payload.sub);
   } catch {
     return null;
@@ -662,7 +2097,12 @@ function parseCartItems(body) {
     if (!line || typeof line !== "object") return [];
     const row = line;
     if (!row.productId) return [];
-    return [{ productId: row.productId, quantity: Number(row.quantity) || 0, finish: row.finish }];
+    return [{
+      productId: row.productId,
+      quantity: Number(row.quantity) || 0,
+      finish: row.finish,
+      customization: row.customization || void 0
+    }];
   });
 }
 function requestApiPath(req) {
@@ -679,27 +2119,74 @@ function requestApiPath(req) {
 async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
   const raw = requestApiPath(req);
   const url = raw.startsWith("/api/") || raw === "/api" ? raw : `/api${raw.startsWith("/") ? raw : `/${raw}`}`;
-  if (!url.startsWith("/api/auth") && !url.startsWith("/api/orders") && !url.startsWith("/api/addresses") && !url.startsWith("/api/checkout")) {
+  if (!url.startsWith("/api/auth") && !url.startsWith("/api/orders") && !url.startsWith("/api/addresses") && !url.startsWith("/api/checkout") && !url.startsWith("/api/admin") && !url.startsWith("/api/products") && !url.startsWith("/api/banners") && !url.startsWith("/api/settings") && !url.startsWith("/api/custom-requests")) {
     return false;
   }
   try {
+    if (req.method === "GET" && url === "/api/settings/public") {
+      const settings = await fetchLiveSettings();
+      return send2(res, 200, {
+        whatsapp: {
+          businessPhone: settings.whatsapp?.businessPhone || "",
+          businessName: settings.whatsapp?.businessName || "CouchKraft Bespoke Concierge",
+          enabled: settings.whatsapp?.enabled ?? true,
+          leadTimeWeeks: settings.whatsapp?.defaultLeadTimeWeeks || 4
+        }
+      });
+    }
+    if (req.method === "POST" && url === "/api/custom-requests") {
+      const body = await readBody(req);
+      const customerName = text(body, "customerName").trim() || text(body, "name").trim();
+      const customerPhone = text(body, "customerPhone").trim() || text(body, "phone").trim();
+      if (!customerPhone) {
+        return send2(res, 400, { error: "Please enter your phone number so our atelier can follow up." });
+      }
+      const user = currentUser(req);
+      const created = await createCustomRequest({
+        customerId: user ? user.id : null,
+        customerName: customerName || (user ? user.name : "Bespoke Client"),
+        customerEmail: text(body, "customerEmail").trim() || text(body, "email").trim() || (user ? user.email : ""),
+        customerPhone,
+        productId: text(body, "productId"),
+        productName: text(body, "productName"),
+        productUrl: text(body, "productUrl"),
+        seatingCapacity: text(body, "seatingCapacity"),
+        dimensions: typeof body.dimensions === "object" ? body.dimensions : void 0,
+        material: text(body, "material"),
+        fabric: text(body, "fabric"),
+        color: text(body, "color"),
+        budget: text(body, "budget"),
+        notes: text(body, "notes")
+      });
+      return send2(res, 201, { ok: true, request: created, message: "Your bespoke furniture commission has been safely submitted." });
+    }
+    if (url.startsWith("/api/admin")) {
+      const body = req.method !== "GET" && req.method !== "HEAD" ? await readBody(req) : {};
+      return handleAdminApi(req, res, url, body);
+    }
+    if (req.method === "GET" && url === "/api/products") {
+      return send2(res, 200, { products: readProducts() });
+    }
+    if (req.method === "GET" && url === "/api/banners") {
+      return send2(res, 200, { banners: readBanners() });
+    }
     if (req.method === "GET" && url === "/api/auth/me") {
       const user = currentUser(req);
-      return send(res, 200, { user: user ? publicCustomer(user) : null });
+      return send2(res, 200, { user: user ? publicCustomer(user) : null });
     }
     if (req.method === "PUT" && url === "/api/auth/profile") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       const body = await readBody(req);
       const name = text(body, "name").trim();
       const email = text(body, "email").trim();
       const phone = text(body, "phone").trim();
-      if (name.length < 2) return send(res, 400, { error: "Please enter your full name." });
-      if (!emailOk(email)) return send(res, 400, { error: "Enter a valid email address." });
-      if (!phoneOk(phone)) return send(res, 400, { error: "Enter a valid phone number, or leave it blank." });
+      if (name.length < 2) return send2(res, 400, { error: "Please enter your full name." });
+      if (!emailOk(email)) return send2(res, 400, { error: "Enter a valid email address." });
+      if (!phoneOk(phone)) return send2(res, 400, { error: "Enter a valid phone number, or leave it blank." });
       const updated = updateProfile(user, { name, email, phone });
-      if ("error" in updated) return send(res, 409, { error: "An account with this email already exists." });
-      return send(res, 200, { user: publicCustomer(updated.customer) });
+      if ("error" in updated) return send2(res, 409, { error: "An account with this email already exists." });
+      return send2(res, 200, { user: publicCustomer(updated.customer) });
     }
     if (req.method === "POST" && url === "/api/auth/register") {
       const body = await readBody(req);
@@ -708,14 +2195,14 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       const phone = text(body, "phone").trim();
       const password = text(body, "password");
       const confirm = text(body, "confirmPassword");
-      if (name.length < 2) return send(res, 400, { error: "Please enter your full name." });
-      if (!emailOk(email)) return send(res, 400, { error: "Enter a valid email address." });
-      if (!phoneOk(phone)) return send(res, 400, { error: "Enter a valid phone number, or leave it blank." });
-      if (!passwordOk(password)) return send(res, 400, { error: "Password must be at least 8 characters." });
-      if (password !== confirm) return send(res, 400, { error: "Passwords do not match." });
+      if (name.length < 2) return send2(res, 400, { error: "Please enter your full name." });
+      if (!emailOk(email)) return send2(res, 400, { error: "Enter a valid email address." });
+      if (!phoneOk(phone)) return send2(res, 400, { error: "Enter a valid phone number, or leave it blank." });
+      if (!passwordOk(password)) return send2(res, 400, { error: "Password must be at least 8 characters." });
+      if (password !== confirm) return send2(res, 400, { error: "Passwords do not match." });
       const created = await createCustomer({ name, email, phone, password });
-      if ("error" in created) return send(res, 409, { error: "An account with this email already exists." });
-      return send(res, 201, {
+      if ("error" in created) return send2(res, 409, { error: "An account with this email already exists." });
+      return send2(res, 201, {
         message: "Account created. Please verify your email before signing in.",
         devActionUrl: `${originFrom(req)}/account/verify?token=${created.verifyToken}`
       });
@@ -724,28 +2211,28 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       const body = await readBody(req);
       const email = text(body, "email").trim();
       const password = text(body, "password");
-      if (!emailOk(email) || !password) return send(res, 400, { error: "Enter your email and password." });
+      if (!emailOk(email) || !password) return send2(res, 400, { error: "Enter your email and password." });
       const customer = findByEmail(email);
       const hash = customer?.passwordHash || "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
-      const ok = await bcrypt2.compare(password, hash);
-      if (!customer || !ok) return send(res, 401, { error: "Email or password is incorrect." });
+      const ok = await bcrypt4.compare(password, hash);
+      if (!customer || !ok) return send2(res, 401, { error: "Email or password is incorrect." });
       if (!customer.emailVerified) {
-        return send(res, 403, {
+        return send2(res, 403, {
           error: "Please verify your email before signing in.",
           needsVerification: true
         });
       }
       setSession(res, customer.id);
-      return send(res, 200, { user: publicCustomer(customer) });
+      return send2(res, 200, { user: publicCustomer(customer) });
     }
     if (req.method === "POST" && url === "/api/auth/logout") {
       clearSession(res);
-      return send(res, 200, { ok: true });
+      return send2(res, 200, { ok: true });
     }
     if (req.method === "POST" && url === "/api/auth/forgot") {
       const body = await readBody(req);
       const email = text(body, "email").trim();
-      if (!emailOk(email)) return send(res, 400, { error: "Enter a valid email address." });
+      if (!emailOk(email)) return send2(res, 400, { error: "Enter a valid email address." });
       const customer = findByEmail(email);
       const payload = {
         message: "If an account exists for this email, reset instructions have been sent."
@@ -753,12 +2240,12 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       if (customer && customer.emailVerified) {
         payload.devActionUrl = `${originFrom(req)}/account/reset?token=${issueResetToken(customer)}`;
       }
-      return send(res, 200, payload);
+      return send2(res, 200, payload);
     }
     if (req.method === "POST" && url === "/api/auth/resend-verification") {
       const body = await readBody(req);
       const email = text(body, "email").trim();
-      if (!emailOk(email)) return send(res, 400, { error: "Enter a valid email address." });
+      if (!emailOk(email)) return send2(res, 400, { error: "Enter a valid email address." });
       const customer = findByEmail(email);
       const payload = {
         message: "If this email needs verification, a new link has been issued."
@@ -766,14 +2253,43 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       if (customer && !customer.emailVerified) {
         payload.devActionUrl = `${originFrom(req)}/account/verify?token=${issueVerifyToken(customer)}`;
       }
-      return send(res, 200, payload);
+      return send2(res, 200, payload);
+    }
+    if (req.method === "POST" && url === "/api/auth/verify-otp") {
+      const body = await readBody(req);
+      const email = text(body, "email").trim();
+      const otp = text(body, "otp").trim();
+      if (!email || !otp) {
+        return send2(res, 400, { error: "Please enter your email and verification code." });
+      }
+      const isDev = process.env.NODE_ENV !== "production";
+      if (!isDev) {
+        return send2(res, 400, { error: "Fixed demo OTP is disabled in production. Please use real verification." });
+      }
+      if (otp !== "1234") {
+        return send2(res, 400, { error: "Invalid verification code. (In development demo mode, use demo OTP: 1234)" });
+      }
+      const customer = findByEmail(email);
+      if (!customer) {
+        return send2(res, 404, { error: "No account found for this email address." });
+      }
+      customer.emailVerified = true;
+      customer.verifyTokenHash = null;
+      customer.verifyExpires = null;
+      saveCustomer(customer);
+      setSession(res, customer.id);
+      return send2(res, 200, {
+        ok: true,
+        message: "Email successfully verified using Demo OTP (1234).",
+        user: publicCustomer(customer)
+      });
     }
     if (req.method === "POST" && url === "/api/auth/verify") {
       const body = await readBody(req);
       const token = text(body, "token");
       const customer = findByVerifyToken(token);
       if (!customer || !customer.verifyExpires || customer.verifyExpires < Date.now()) {
-        return send(res, 400, { error: "This verification link is invalid or has expired." });
+        return send2(res, 400, { error: "This verification link is invalid or has expired." });
       }
       saveCustomer({
         ...customer,
@@ -781,44 +2297,44 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
         verifyTokenHash: null,
         verifyExpires: null
       });
-      return send(res, 200, { message: "Email verified. You can sign in now." });
+      return send2(res, 200, { message: "Email verified. You can sign in now." });
     }
     if (req.method === "GET" && url === "/api/addresses") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
-      return send(res, 200, { addresses: user.addresses });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
+      return send2(res, 200, { addresses: user.addresses });
     }
     if (req.method === "POST" && url === "/api/addresses") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       const parsed = parseAddress(await readBody(req));
-      if ("error" in parsed) return send(res, 400, { error: parsed.error });
-      return send(res, 201, { address: addAddress(user, parsed) });
+      if ("error" in parsed) return send2(res, 400, { error: parsed.error });
+      return send2(res, 201, { address: addAddress(user, parsed) });
     }
     const addressMatch = url.match(/^\/api\/addresses\/([^/]+)$/);
     if (addressMatch && req.method === "PUT") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       const parsed = parseAddress(await readBody(req));
-      if ("error" in parsed) return send(res, 400, { error: parsed.error });
+      if ("error" in parsed) return send2(res, 400, { error: parsed.error });
       const address = updateAddress(user, addressMatch[1], parsed);
-      if (!address) return send(res, 404, { error: "Address not found." });
-      return send(res, 200, { address });
+      if (!address) return send2(res, 404, { error: "Address not found." });
+      return send2(res, 200, { address });
     }
     if (addressMatch && req.method === "DELETE") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
-      if (!removeAddress(user, addressMatch[1])) return send(res, 404, { error: "Address not found." });
-      return send(res, 200, { ok: true });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
+      if (!removeAddress(user, addressMatch[1])) return send2(res, 404, { error: "Address not found." });
+      return send2(res, 200, { ok: true });
     }
     if (req.method === "GET" && url === "/api/orders") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
-      return send(res, 200, { orders: listOrdersForCustomer(user.id) });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
+      return send2(res, 200, { orders: listOrdersForCustomer(user.id) });
     }
     if (req.method === "GET" && url === "/api/checkout/config") {
       const keys = razorpayConfigFrom(runtimeEnv);
-      return send(res, 200, {
+      return send2(res, 200, {
         configured: true,
         gateway: keys.ok ? "razorpay" : "demo",
         mode: keys.ok ? "test" : "demo",
@@ -828,27 +2344,27 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
     }
     if (req.method === "POST" && url === "/api/checkout/session") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in to continue to payment." });
+      if (!user) return send2(res, 401, { error: "Please sign in to continue to payment." });
       const keys = razorpayConfigFrom(runtimeEnv);
       if (checkoutLocks.has(user.id)) {
-        return send(res, 409, { error: "A payment attempt is already in progress. Please wait a moment." });
+        return send2(res, 409, { error: "A payment attempt is already in progress. Please wait a moment." });
       }
       checkoutLocks.add(user.id);
       try {
         const body = await readBody(req);
         const addressId = text(body, "addressId");
         const ownedAddress = addressId ? user.addresses.find((entry) => entry.id === addressId) ?? null : null;
-        if (addressId && !ownedAddress) return send(res, 400, { error: "Choose a saved address that belongs to you." });
+        if (addressId && !ownedAddress) return send2(res, 400, { error: "Choose a saved address that belongs to you." });
         let address = ownedAddress;
         if (!address) {
           const parsedAddress = parseAddress(body);
-          if ("error" in parsedAddress) return send(res, 400, { error: parsedAddress.error });
+          if ("error" in parsedAddress) return send2(res, 400, { error: parsedAddress.error });
           address = { ...parsedAddress, id: "checkout" };
         }
         const items = parseCartItems(body);
         const coupon = text(body, "coupon") || null;
         const phone = text(body, "phone").trim() || user.phone;
-        if (!phoneOk(phone) || !phone) return send(res, 400, { error: "Enter a valid phone number for this order." });
+        if (!phoneOk(phone) || !phone) return send2(res, 400, { error: "Enter a valid phone number for this order." });
         const contact = {
           name: text(body, "name").trim() || user.name,
           email: user.email,
@@ -857,7 +2373,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
         const fingerprint = cartFingerprint(items, coupon, `${address.line1}|${address.city}|${address.postalCode}`);
         let order = findReusableCheckoutOrder(user.id, fingerprint);
         if (!order) {
-          const created = createOrderFromCart(user.id, {
+          const created = await createOrderFromCart(user.id, {
             items,
             address,
             coupon,
@@ -865,11 +2381,11 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
             paymentStatus: "pending",
             cartFingerprint: fingerprint
           });
-          if ("error" in created) return send(res, 400, { error: "Your bag has no valid pieces to order." });
+          if ("error" in created) return send2(res, 400, { error: created.message || "Your bag has no valid pieces to order." });
           order = created.order;
         }
         if (order.paymentStatus === "paid") {
-          return send(res, 200, { order, alreadyPaid: true, gateway: keys.ok ? "razorpay" : "demo" });
+          return send2(res, 200, { order, alreadyPaid: true, gateway: keys.ok ? "razorpay" : "demo" });
         }
         if (!order.razorpayOrderId) {
           if (keys.ok) {
@@ -883,7 +2399,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
             order = attachRazorpayOrder(order.id, user.id, `order_demo_${order.id}`) || order;
           }
         }
-        return send(res, 200, {
+        return send2(res, 200, {
           gateway: keys.ok ? "razorpay" : "demo",
           keyId: keys.ok ? keys.config.keyId : null,
           razorpayOrderId: order.razorpayOrderId,
@@ -892,7 +2408,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
           order
         });
       } catch (error) {
-        return send(res, 502, {
+        return send2(res, 502, {
           error: error instanceof Error ? error.message : "Payment could not be started. Please retry."
         });
       } finally {
@@ -901,9 +2417,9 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
     }
     if (req.method === "POST" && url === "/api/checkout/demo") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       if (razorpayConfigFrom(runtimeEnv).ok) {
-        return send(res, 400, { error: "Demo gateway is disabled while Razorpay test keys are configured." });
+        return send2(res, 400, { error: "Demo gateway is disabled while Razorpay test keys are configured." });
       }
       const body = await readBody(req);
       const orderId = text(body, "orderId");
@@ -911,16 +2427,16 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       const action = text(body, "action") || "success";
       const methods = ["card", "cash", "upi", "netbanking"];
       if (!methods.includes(method)) {
-        return send(res, 400, { error: "Choose card, cash, UPI or net banking." });
+        return send2(res, 400, { error: "Choose card, cash, UPI or net banking." });
       }
       const existing = getOrderForCustomer(user.id, orderId);
-      if (!existing) return send(res, 404, { error: "Order not found." });
+      if (!existing) return send2(res, 404, { error: "Order not found." });
       if (!existing.razorpayOrderId?.startsWith("order_demo_")) {
-        return send(res, 400, { error: "This order is not using the demo gateway." });
+        return send2(res, 400, { error: "This order is not using the demo gateway." });
       }
       if (action === "fail") {
         const order = markOrderPaymentFailed(orderId, user.id, "Demo payment failed.");
-        return send(res, 200, { order, failed: true });
+        return send2(res, 200, { order, failed: true });
       }
       const labels = {
         card: "Card",
@@ -929,35 +2445,35 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
         cash: "Cash on delivery"
       };
       if (method === "cash") {
-        const result2 = markCashOnDelivery(user.id, {
+        const result2 = await markCashOnDelivery(user.id, {
           orderId,
           razorpayOrderId: existing.razorpayOrderId
         });
-        if ("error" in result2) return send(res, 400, { error: "This payment does not match the order on your account." });
-        return send(res, 200, { order: result2.order });
+        if ("error" in result2) return send2(res, 400, { error: "This payment does not match the order on your account." });
+        return send2(res, 200, { order: result2.order });
       }
-      const result = markOrderPaid(user.id, {
+      const result = await markOrderPaid(user.id, {
         orderId,
         razorpayOrderId: existing.razorpayOrderId,
         razorpayPaymentId: `pay_demo_${existing.id}`,
         paymentMethod: method,
         deliveryMethod: labels[method]
       });
-      if ("error" in result) return send(res, 400, { error: "This payment does not match the order on your account." });
-      return send(res, 200, { order: result.order });
+      if ("error" in result) return send2(res, 400, { error: "This payment does not match the order on your account." });
+      return send2(res, 200, { order: result.order });
     }
     if (req.method === "POST" && url === "/api/checkout/verify") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       const keys = razorpayConfigFrom(runtimeEnv);
-      if (!keys.ok) return send(res, 400, { error: "Use the demo gateway until Razorpay test keys are added." });
+      if (!keys.ok) return send2(res, 400, { error: "Use the demo gateway until Razorpay test keys are added." });
       const body = await readBody(req);
       const orderId = text(body, "orderId");
       const razorpayOrderId = text(body, "razorpay_order_id");
       const razorpayPaymentId = text(body, "razorpay_payment_id");
       const signature = text(body, "razorpay_signature");
       if (!orderId || !razorpayOrderId || !razorpayPaymentId || !signature) {
-        return send(res, 400, { error: "Payment details are incomplete." });
+        return send2(res, 400, { error: "Payment details are incomplete." });
       }
       const valid = verifyRazorpaySignature(keys.config.keySecret, {
         orderId: razorpayOrderId,
@@ -966,77 +2482,77 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       });
       if (!valid) {
         markOrderPaymentFailed(orderId, user.id, "Payment signature could not be verified.");
-        return send(res, 400, { error: "Payment could not be verified. This order has not been marked as paid." });
+        return send2(res, 400, { error: "Payment could not be verified. This order has not been marked as paid." });
       }
-      const result = markOrderPaid(user.id, { orderId, razorpayOrderId, razorpayPaymentId });
+      const result = await markOrderPaid(user.id, { orderId, razorpayOrderId, razorpayPaymentId });
       if ("error" in result) {
-        return send(res, result.error === "missing" ? 404 : 400, {
+        return send2(res, result.error === "missing" ? 404 : 400, {
           error: result.error === "missing" ? "Order not found." : "This payment does not match the order on your account."
         });
       }
-      return send(res, 200, { order: result.order });
+      return send2(res, 200, { order: result.order });
     }
     if (req.method === "POST" && url === "/api/checkout/fail") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       const body = await readBody(req);
       const order = markOrderPaymentFailed(
         text(body, "orderId"),
         user.id,
         text(body, "reason") || "Payment failed or was cancelled."
       );
-      if (!order) return send(res, 404, { error: "Order not found." });
-      return send(res, 200, { order });
+      if (!order) return send2(res, 404, { error: "Order not found." });
+      return send2(res, 200, { order });
     }
     if (req.method === "POST" && url === "/api/orders") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       const body = await readBody(req);
       const addressId = text(body, "addressId");
       const address = addressId ? user.addresses.find((entry) => entry.id === addressId) ?? null : null;
-      if (addressId && !address) return send(res, 400, { error: "Choose a saved address that belongs to you." });
+      if (addressId && !address) return send2(res, 400, { error: "Choose a saved address that belongs to you." });
       const items = parseCartItems(body);
-      const created = createOrderFromCart(user.id, {
+      const created = await createOrderFromCart(user.id, {
         items,
         address,
         coupon: text(body, "coupon") || null
       });
-      if ("error" in created) return send(res, 400, { error: "Your bag has no valid pieces to order." });
-      return send(res, 201, { order: created.order });
+      if ("error" in created) return send2(res, 400, { error: created.message || "Your bag has no valid pieces to order." });
+      return send2(res, 201, { order: created.order });
     }
     if (req.method === "GET" && url === "/api/orders/lookup") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       const number = new URL(req.url || "", "http://localhost").searchParams.get("number") || "";
       const order = getOrderByNumberForCustomer(user.id, number);
-      if (!order) return send(res, 404, { error: "No matching order was found on this account." });
-      return send(res, 200, { order });
+      if (!order) return send2(res, 404, { error: "No matching order was found on this account." });
+      return send2(res, 200, { order });
     }
     const orderMatch = url.match(/^\/api\/orders\/([^/]+)$/);
     if (orderMatch && req.method === "GET") {
       const user = currentUser(req);
-      if (!user) return send(res, 401, { error: "Please sign in." });
+      if (!user) return send2(res, 401, { error: "Please sign in." });
       const order = getOrderForCustomer(user.id, orderMatch[1]);
-      if (!order) return send(res, 404, { error: "Order not found." });
-      return send(res, 200, { order });
+      if (!order) return send2(res, 404, { error: "Order not found." });
+      return send2(res, 200, { order });
     }
     if (req.method === "POST" && url === "/api/auth/reset") {
       const body = await readBody(req);
       const token = text(body, "token");
       const password = text(body, "password");
       const confirm = text(body, "confirmPassword");
-      if (!passwordOk(password)) return send(res, 400, { error: "Password must be at least 8 characters." });
-      if (password !== confirm) return send(res, 400, { error: "Passwords do not match." });
+      if (!passwordOk(password)) return send2(res, 400, { error: "Password must be at least 8 characters." });
+      if (password !== confirm) return send2(res, 400, { error: "Passwords do not match." });
       const customer = findByResetToken(token);
       if (!customer || !customer.resetExpires || customer.resetExpires < Date.now()) {
-        return send(res, 400, { error: "This reset link is invalid or has expired." });
+        return send2(res, 400, { error: "This reset link is invalid or has expired." });
       }
       await setPassword(customer, password);
-      return send(res, 200, { message: "Password updated. You can sign in now." });
+      return send2(res, 200, { message: "Password updated. You can sign in now." });
     }
-    return send(res, 404, { error: "Not found." });
+    return send2(res, 404, { error: "Not found." });
   } catch {
-    return send(res, 500, { error: "Something went wrong. Please try again." });
+    return send2(res, 500, { error: "Something went wrong. Please try again." });
   }
 }
 

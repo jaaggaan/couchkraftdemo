@@ -33,6 +33,7 @@ export type OrderItem = {
   finish: string
   quantity: number
   unitPrice: number
+  customization?: any
 }
 
 export type Order = {

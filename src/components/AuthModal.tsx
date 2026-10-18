@@ -26,6 +26,7 @@ export function AuthModal() {
   const [formSuccess, setFormSuccess] = useState('')
   const [devUrl, setDevUrl] = useState('')
   const [busy, setBusy] = useState(false)
+  const [otp, setOtp] = useState('')
 
   useEffect(() => {
     if (!modalOpen) return
@@ -80,6 +81,13 @@ export function AuthModal() {
       closeAuth()
       return
     }
+    if (result.needsVerification) {
+      setPassword('')
+      setFormError('')
+      openAuth('verify')
+      setFormSuccess('Please enter your verification code to continue.')
+      return
+    }
     setFormError(result.error || 'Unable to sign in.')
   }
 
@@ -91,11 +99,32 @@ export function AuthModal() {
     const result = await authApi.register({ name, email, phone, password, confirmPassword })
     setBusy(false)
     if (result.status === 201) {
-      setFormSuccess(result.message || 'Account created.')
-      setDevUrl(result.devActionUrl || '')
+      setPassword('')
+      setConfirmPassword('')
+      openAuth('verify')
+      setFormSuccess('Account created! Please enter your verification code below.')
       return
     }
     setFormError(result.error || 'Unable to create this account.')
+  }
+
+  const submitVerifyOtp = async () => {
+    if (!otp.trim()) {
+      setErrors({ otp: 'Please enter the 4-digit verification code.' })
+      return
+    }
+    setBusy(true)
+    setFormError('')
+    setFormSuccess('')
+    const result = await authApi.verifyOtp(email, otp.trim())
+    setBusy(false)
+    if (result.user) {
+      setFormSuccess(result.message || 'Verification successful.')
+      await refresh()
+      window.setTimeout(() => closeAuth(), 600)
+      return
+    }
+    setFormError(result.error || 'Verification failed. In development demo mode, use demo OTP: 1234')
   }
 
   const submitForgot = async () => {
@@ -284,6 +313,83 @@ export function AuthModal() {
                 Sign in
               </button>
             </p>
+          </>
+        ) : null}
+
+        {view === 'verify' ? (
+          <>
+            <h2 id={titleId}>Verify your email</h2>
+            <p className="auth-lead">
+              Enter the verification code sent to <strong>{email}</strong>.
+            </p>
+            <div className="auth-demo">
+              <p className="auth-demo-label">Development / Demo Mode</p>
+              <p>
+                Demo OTP: <code>1234</code>
+              </p>
+              <button
+                type="button"
+                className="auth-text-link"
+                onClick={() => {
+                  setOtp('1234')
+                  setErrors({})
+                  setFormError('')
+                }}
+              >
+                Auto-fill demo OTP (1234)
+              </button>
+            </div>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                void submitVerifyOtp()
+              }}
+            >
+              <label className="auth-field">
+                Verification Code (OTP)
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="e.g. 1234"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  autoFocus
+                  style={{ letterSpacing: '0.2em', fontSize: 18, textAlign: 'center' }}
+                />
+                {errors.otp ? <span className="auth-error">{errors.otp}</span> : null}
+              </label>
+              {formError ? <p className="auth-error">{formError}</p> : null}
+              {formSuccess ? <p className="auth-success">{formSuccess}</p> : null}
+              <button className="btn auth-submit" type="submit" disabled={busy}>
+                {busy ? 'Verifying…' : 'Verify & Continue'}
+              </button>
+            </form>
+            <div className="auth-switch">
+              <button
+                type="button"
+                className="auth-text-link"
+                onClick={() => {
+                  void authApi.resend(email).then((result) => {
+                    setFormSuccess(result.message || 'New verification code requested.')
+                  })
+                }}
+              >
+                Resend code
+              </button>
+              {' · '}
+              <button
+                type="button"
+                className="auth-text-link"
+                onClick={() => {
+                  setOtp('')
+                  setFormError('')
+                  setFormSuccess('')
+                  openAuth('signin')
+                }}
+              >
+                Back to sign in
+              </button>
+            </div>
           </>
         ) : null}
 

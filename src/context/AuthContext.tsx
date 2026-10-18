@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { authApi, type AuthUser } from '../lib/auth-api'
 
-export type AuthView = 'signin' | 'signup' | 'forgot'
+export type AuthView = 'signin' | 'signup' | 'forgot' | 'verify'
 
 type AuthContextValue = {
   user: AuthUser | null

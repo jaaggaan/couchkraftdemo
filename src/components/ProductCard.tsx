@@ -10,101 +10,165 @@ type ProductCardProps = {
   showPrice?: boolean
 }
 
-function useFineHover() {
-  const [fineHover, setFineHover] = useState(() =>
-    window.matchMedia('(hover: hover) and (pointer: fine)').matches,
+function PrevChevron({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15 18l-6-6 6-6" />
+    </svg>
+  )
+}
+
+function NextChevron({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 18l6-6-6-6" />
+    </svg>
+  )
+}
+
+function useSwipeGallery() {
+  const [swipe, setSwipe] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 1024px), (hover: none)').matches : false,
   )
 
   useEffect(() => {
-    const media = window.matchMedia('(hover: hover) and (pointer: fine)')
-    const sync = () => setFineHover(media.matches)
+    const media = window.matchMedia('(max-width: 1024px), (hover: none)')
+    const sync = () => setSwipe(media.matches)
     sync()
     media.addEventListener('change', sync)
     return () => media.removeEventListener('change', sync)
   }, [])
 
-  return fineHover
+  return swipe
 }
 
 export function ProductCard({ product, showPrice = true }: ProductCardProps) {
   const { toggleWishlist, isWishlisted } = useStore()
   const wished = isWishlisted(product.id)
-  const images = product.images.slice(0, 4)
+  const images = (product.images && product.images.length > 0) ? product.images : []
+  const hasMultiple = images.length > 1
   const [index, setIndex] = useState(0)
-  const timer = useRef<number | null>(null)
-  const figureRef = useRef<HTMLElement | null>(null)
-  const fineHover = useFineHover()
-
-  const clearTimer = () => {
-    if (timer.current) {
-      window.clearInterval(timer.current)
-      timer.current = null
-    }
-  }
-
-  const stopSlide = () => {
-    clearTimer()
-    setIndex(0)
-  }
-
-  const startSlide = () => {
-    if (images.length < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    clearTimer()
-    const tick = () => setIndex((current) => (current + 1) % images.length)
-    tick()
-    timer.current = window.setInterval(tick, 1400)
-  }
-
-  useEffect(() => () => clearTimer(), [])
+  const sliderRef = useRef<HTMLDivElement | null>(null)
+  const swipe = useSwipeGallery()
 
   useEffect(() => {
-    const node = figureRef.current
-    if (!node || fineHover || images.length < 2) {
-      clearTimer()
-      return
-    }
+    setIndex(0)
+    sliderRef.current?.scrollTo({ left: 0 })
+  }, [swipe, product.id])
 
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) startSlide()
-        else stopSlide()
-      },
-      { threshold: 0.45 },
-    )
-
-    observer.observe(node)
-    return () => {
-      observer.disconnect()
-      clearTimer()
+  const goToIndex = (targetIndex: number, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
     }
-  }, [fineHover, images.length])
+    if (!hasMultiple) return
+    const clampedIndex = (targetIndex + images.length) % images.length
+    setIndex(clampedIndex)
+    if (sliderRef.current) {
+      const width = sliderRef.current.clientWidth
+      sliderRef.current.scrollTo({
+        left: clampedIndex * width,
+        behavior: 'smooth',
+      })
+    }
+  }
+
+  const prevImage = (e: React.MouseEvent) => {
+    goToIndex(index - 1, e)
+  }
+
+  const nextImage = (e: React.MouseEvent) => {
+    goToIndex(index + 1, e)
+  }
+
+  const syncSwipeIndex = () => {
+    const node = sliderRef.current
+    if (!node) return
+    const width = node.clientWidth
+    if (!width) return
+    const newIdx = Math.round(node.scrollLeft / width)
+    if (newIdx !== index && newIdx >= 0 && newIdx < images.length) {
+      setIndex(newIdx)
+    }
+  }
 
   return (
     <article className="product-card">
-      <figure
-        ref={figureRef}
-        onPointerEnter={fineHover ? startSlide : undefined}
-        onPointerLeave={fineHover ? stopSlide : undefined}
-      >
-        <Link to={`/product/${product.slug}`} className="product-slider-link" aria-label={product.name}>
-          <div className="product-slider" style={{ transform: `translateX(-${index * 100}%)` }}>
+      <figure>
+        {swipe ? (
+          <div className="product-slider is-swipe" ref={sliderRef} onScroll={syncSwipeIndex}>
             {images.map((src, imageIndex) => (
-              <img
-                key={src}
-                src={src}
-                alt={imageIndex === 0 ? product.name : `${product.name}, view ${imageIndex + 1}`}
-                width={640}
-                height={600}
-                loading="lazy"
-              />
+              <Link
+                key={`${src}-${imageIndex}`}
+                to={`/product/${product.slug}`}
+                className="product-slide"
+                aria-label={imageIndex === 0 ? product.name : `${product.name}, view ${imageIndex + 1}`}
+              >
+                <img
+                  src={src}
+                  alt={imageIndex === 0 ? product.name : `${product.name}, view ${imageIndex + 1}`}
+                  width={640}
+                  height={600}
+                  loading="lazy"
+                />
+              </Link>
             ))}
           </div>
-        </Link>
-        <div className="slide-dots" aria-hidden="true">
-          {images.map((src, imageIndex) => (
-            <span key={src} className={imageIndex === index ? 'is-on' : undefined} />
-          ))}
-        </div>
+        ) : (
+          <Link to={`/product/${product.slug}`} className="product-slider-link" aria-label={product.name}>
+            <div className="product-slider" style={{ transform: `translateX(-${index * 100}%)` }}>
+              {images.map((src, imageIndex) => (
+                <img
+                  key={`${src}-${imageIndex}`}
+                  src={src}
+                  alt={imageIndex === 0 ? product.name : `${product.name}, view ${imageIndex + 1}`}
+                  width={640}
+                  height={600}
+                  loading="lazy"
+                />
+              ))}
+            </div>
+          </Link>
+        )}
+
+        {hasMultiple && (
+          <>
+            <button
+              type="button"
+              className="product-card-arrow is-prev"
+              aria-label={`Previous image for ${product.name}`}
+              onClick={prevImage}
+            >
+              <PrevChevron />
+            </button>
+            <button
+              type="button"
+              className="product-card-arrow is-next"
+              aria-label={`Next image for ${product.name}`}
+              onClick={nextImage}
+            >
+              <NextChevron />
+            </button>
+
+            <div className="slide-dots" role="tablist" aria-label={`Images for ${product.name}`}>
+              {images.map((src, imageIndex) => {
+                const active = imageIndex === index
+                return (
+                  <button
+                    key={`${src}-${imageIndex}`}
+                    type="button"
+                    role="tab"
+                    className={`slide-dot${active ? ' is-on' : ''}`}
+                    aria-label={`View image ${imageIndex + 1} of ${images.length}`}
+                    aria-selected={active}
+                    onClick={(e) => goToIndex(imageIndex, e)}
+                  />
+                )
+              })}
+            </div>
+          </>
+        )}
+
         <button
           type="button"
           className={wished ? 'wish is-on' : 'wish'}
@@ -115,6 +179,7 @@ export function ProductCard({ product, showPrice = true }: ProductCardProps) {
           <HeartIcon filled={wished} />
         </button>
       </figure>
+
       <div className="product-meta">
         <Link to={`/product/${product.slug}`}>{product.name}</Link>
         {showPrice ? (
@@ -122,6 +187,11 @@ export function ProductCard({ product, showPrice = true }: ProductCardProps) {
             {product.compareAt ? <span className="price-was">{formatPrice(product.compareAt)}</span> : null}
             <strong>{formatPrice(product.price)}</strong>
           </span>
+        ) : null}
+        {!product.madeToOrder && (product.readyToShipStock ?? 1) <= 0 ? (
+          <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 600, display: 'block', marginTop: 3 }}>Out of stock</span>
+        ) : !product.madeToOrder && (product.readyToShipStock ?? 10) <= (product.lowStockThreshold ?? 2) ? (
+          <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600, display: 'block', marginTop: 3 }}>Only {product.readyToShipStock} left</span>
         ) : null}
       </div>
     </article>

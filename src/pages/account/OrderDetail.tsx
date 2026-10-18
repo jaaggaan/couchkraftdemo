@@ -62,6 +62,16 @@ export function OrderDetail() {
               <p className="form-note">
                 {item.finish} · Qty {item.quantity}
               </p>
+              {item.customization && (
+                <p className="form-note" style={{ color: '#835022', fontSize: 11, marginTop: 2 }}>
+                  {[
+                    item.customization.seating,
+                    item.customization.width ? `${item.customization.width}×${item.customization.depth}×${item.customization.height}${item.customization.dimensionUnit || 'cm'}` : null,
+                    item.customization.fabric,
+                    item.customization.color,
+                  ].filter(Boolean).join(' · ')}
+                </p>
+              )}
             </div>
             <strong>{formatPrice(item.unitPrice * item.quantity)}</strong>
           </li>

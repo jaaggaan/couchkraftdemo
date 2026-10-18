@@ -1,0 +1,49 @@
+[
+  {
+    "id": "coup_warm10",
+    "code": "WARM10",
+    "type": "percent",
+    "value": 10,
+    "minOrderValue": 20000,
+    "maxDiscount": 15000,
+    "startDate": "2026-10-14T07:10:11.486Z",
+    "endDate": "2027-01-12T07:10:11.487Z",
+    "usageLimit": 500,
+    "usedCount": 38,
+    "active": true,
+    "description": "10% off on all living and lounge handcrafted silhouettes.",
+    "createdAt": "2026-10-14T07:10:11.487Z",
+    "updatedAt": "2026-10-14T07:10:11.487Z"
+  },
+  {
+    "id": "coup_festive15",
+    "code": "FESTIVE15",
+    "type": "percent",
+    "value": 15,
+    "minOrderValue": 50000,
+    "maxDiscount": 25000,
+    "startDate": "2026-10-14T07:10:11.487Z",
+    "endDate": "2026-11-13T07:10:11.487Z",
+    "usageLimit": 200,
+    "usedCount": 14,
+    "active": true,
+    "description": "Special Diwali & Festive season tier discount.",
+    "createdAt": "2026-10-14T07:10:11.487Z",
+    "updatedAt": "2026-10-14T07:10:11.487Z"
+  },
+  {
+    "id": "coup_welcome5k",
+    "code": "WELCOME5000",
+    "type": "flat",
+    "value": 5000,
+    "minOrderValue": 75000,
+    "startDate": "2026-10-14T07:10:11.487Z",
+    "endDate": "2027-04-12T07:10:11.487Z",
+    "usageLimit": 1000,
+    "usedCount": 82,
+    "active": true,
+    "description": "₹5,000 off on first bespoke order above ₹75,000.",
+    "createdAt": "2026-10-14T07:10:11.487Z",
+    "updatedAt": "2026-10-14T07:10:11.487Z"
+  }
+]

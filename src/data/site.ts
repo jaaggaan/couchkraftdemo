@@ -4,9 +4,9 @@ export const site = {
   name: 'CouchKraft',
   tagline: 'Lets Craft Comfort',
   email: 'contact@Couchkraft.in',
-  phoneDisplay: '8073174325',
-  phoneHref: 'tel:8073174325',
-  whatsappHref: 'https://wa.me/918073174325',
+  phoneDisplay: '+91 63607 04340',
+  phoneHref: 'tel:916360704340',
+  whatsappHref: 'https://wa.me/916360704340?text=Hello%20CouchKraft%2C%20I%20am%20enquiring%20about%20your%20handcrafted%20artisanal%20furniture%20collection.',
   address:
     'Couchkraft Furniture Store, No. 45, 2nd Floor, Old Madras Road, Near KR Puram Railway Station, KR Puram, Bengaluru, Karnataka - 560036',
   hours: 'Mon–Fri, 9:30 AM – 9:30 PM',

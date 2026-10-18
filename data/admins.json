@@ -1,0 +1,11 @@
+[
+  {
+    "id": "admin_devang_01",
+    "name": "Devang V.",
+    "email": "admin@couchkraft.in",
+    "role": "owner",
+    "avatarUrl": "https://lh3.googleusercontent.com/aida/AEtjO1U-jXIhz33Xm08EzyafM8zL58IucpUMfP_Uh1YjU7Bi3wHrNQLs_txrVhHARZ6fMZPpH69tTPUfE_mPEjtFOE7OihQThW0QwICxknNz6Q7mmF1Nzx-x0RQwMIINjOpPvR3iUbX_vOzhimZkLpt5w2RoZrjMdNWGZ69QaRY6F0GIdBzDlqMCsc051Q9nBcvuMDDddNABcdnl2rGXeKcvFZg2i7uVDpVufulCakZsWBY5gkfz4L1MU8ClZ38C9fWHlAGysG2z9OHbSmQ",
+    "passwordHash": "$2b$10$uoh2zjzfojL5ow1XMaj7wOa3j8q2TlZX4RXaal9LK38QjEgDDGCHK",
+    "createdAt": "2026-10-14T07:11:49.681Z"
+  }
+]

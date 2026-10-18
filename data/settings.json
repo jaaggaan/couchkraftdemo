@@ -1,0 +1,10 @@
+{
+  "whatsapp": {
+    "businessPhone": "+91 63607 04340",
+    "businessName": "CouchKraft Bespoke Concierge",
+    "enabled": true,
+    "conciergeEmail": "concierge@couchkraft.in",
+    "workingHours": "Mon - Sat: 10:00 AM - 7:00 PM IST",
+    "defaultLeadTimeWeeks": 4
+  }
+}

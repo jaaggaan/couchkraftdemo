@@ -1,3 +1,6 @@
+import { ScrollToTop } from './components/ScrollToTop'
+import { useEffect } from 'react'
+import { supabase, supabaseUrl } from './lib/supabase'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { StoreProvider } from './context/StoreContext'
 import { AuthProvider } from './context/AuthContext'
@@ -26,9 +29,20 @@ import { WishlistPage } from './pages/WishlistPage'
 import { PageTitle } from './components/PageTitle'
 
 export default function App() {
+  useEffect(() => {
+    console.log('[CouchKraft] Live Supabase URL:', supabaseUrl)
+    supabase.from('products').select('*').limit(5).then(res => {
+      console.log('[CouchKraft Supabase Storefront Request] Status:', res.status, 'Products received:', res.data?.length)
+    })
+    supabase.from('categories').select('*').limit(5).then(res => {
+      console.log('[CouchKraft Supabase Storefront Request] Status:', res.status, 'Categories received:', res.data?.length)
+    })
+  }, [])
+
   return (
     <StoreProvider>
       <BrowserRouter>
+        <ScrollToTop />
         <AuthProvider>
           <a className="skip-link" href="#main">
             Skip to content

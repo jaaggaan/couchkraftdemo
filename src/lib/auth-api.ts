@@ -40,6 +40,7 @@ export const authApi = {
   forgot: (email: string) => request('/api/auth/forgot', { email }),
   resend: (email: string) => request('/api/auth/resend-verification', { email }),
   verify: (token: string) => request('/api/auth/verify', { token }),
+  verifyOtp: (email: string, otp: string) => request('/api/auth/verify-otp', { email, otp }),
   reset: (token: string, password: string, confirmPassword: string) =>
     request('/api/auth/reset', { token, password, confirmPassword }),
 }

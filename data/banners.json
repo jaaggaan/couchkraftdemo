@@ -1,0 +1,53 @@
+[
+  {
+    "id": "banner_living",
+    "title": "In soft sculpture",
+    "subtitle": "A quiet oak frame and generous bouclé contours that belong in a sunlit living room.",
+    "desktopImage": "/hero-living-hd.jpg",
+    "mobileImage": "/hero-living-scene.jpg",
+    "ctaLabel": "Shop the Collection",
+    "ctaUrl": "/shop?space=living",
+    "badge": "NEW COLLECTION 2026",
+    "alignment": "right",
+    "tone": "dark",
+    "space": "living",
+    "active": true,
+    "displayOrder": 1,
+    "createdAt": "2026-10-14T07:10:11.487Z",
+    "updatedAt": "2026-10-14T07:10:11.487Z"
+  },
+  {
+    "id": "banner_dining",
+    "title": "Gather beautifully",
+    "subtitle": "Solid teakwood dining centerpieces engineered for generational memory.",
+    "desktopImage": "/hero-dining-hd.jpg",
+    "mobileImage": "/hero-dining.jpg",
+    "ctaLabel": "Explore Dining",
+    "ctaUrl": "/shop?space=dining",
+    "badge": "EDITORIAL FEATURE",
+    "alignment": "left",
+    "tone": "dark",
+    "space": "dining",
+    "active": true,
+    "displayOrder": 2,
+    "createdAt": "2026-10-14T07:10:11.487Z",
+    "updatedAt": "2026-10-14T07:10:11.487Z"
+  },
+  {
+    "id": "banner_lounge",
+    "title": "A quieter kind of comfort",
+    "subtitle": "Deep sloped seats contoured around sustainably sourced Sheesham wood.",
+    "desktopImage": "/hero-lounge-hd.jpg",
+    "mobileImage": "/hero-lounge.jpg",
+    "ctaLabel": "Discover Lounge",
+    "ctaUrl": "/shop?space=lounge",
+    "badge": "BESTSELLER",
+    "alignment": "right",
+    "tone": "dark",
+    "space": "lounge",
+    "active": true,
+    "displayOrder": 3,
+    "createdAt": "2026-10-14T07:10:11.487Z",
+    "updatedAt": "2026-10-14T07:10:11.487Z"
+  }
+]

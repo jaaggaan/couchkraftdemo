@@ -1,3 +1,4 @@
+import { supabase } from './supabase-client.ts'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -114,6 +115,7 @@ export async function createCustomer(input: {
   }
   customers.push(customer)
   writeAll(customers)
+  void syncCustomerToSupabase(customer)
   return { customer, verifyToken }
 }
 
@@ -124,6 +126,7 @@ export async function verifyPassword(customer: Customer, password: string) {
 export function saveCustomer(updated: Customer) {
   const customers = readAll().map((customer) => (customer.id === updated.id ? updated : customer))
   writeAll(customers)
+  void syncCustomerToSupabase(updated)
 }
 
 export function updateProfile(
@@ -197,4 +200,24 @@ export function removeAddress(customer: Customer, addressId: string) {
   if (!customer.addresses.some((address) => address.id === addressId)) return false
   saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) })
   return true
+}
+
+export async function syncCustomerToSupabase(customer: Customer) {
+  try {
+    await supabase.from('customers').upsert([{
+      id: customer.id,
+      name: customer.name,
+      email: customer.email,
+      phone: customer.phone,
+      password_hash: customer.passwordHash,
+      email_verified: customer.emailVerified,
+      verify_token: customer.verifyTokenHash,
+      reset_token: customer.resetTokenHash,
+      reset_expires: customer.resetExpires,
+      addresses: customer.addresses || [],
+      created_at: customer.createdAt,
+    }], { onConflict: 'id' })
+  } catch (err) {
+    console.warn('[Supabase Customer Sync Warning]:', err)
+  }
 }

@@ -1,3 +1,8 @@
+import { fetchLiveSettings } from './settings-store.ts'
+import { createCustomRequest } from './custom-request-store.ts'
+import { handleAdminApi } from './admin-api-handler.ts'
+import { readProducts } from './product-store.ts'
+import { readBanners } from './marketing-store.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createHmac } from 'node:crypto'
 import bcrypt from 'bcryptjs'
@@ -139,9 +144,14 @@ function parseCartItems(body: Body) {
   const rawItems = Array.isArray(body.items) ? body.items : []
   return rawItems.flatMap((line) => {
     if (!line || typeof line !== 'object') return []
-    const row = line as { productId?: string; quantity?: number; finish?: string }
+    const row = line as { productId?: string; quantity?: number; finish?: string; customization?: any }
     if (!row.productId) return []
-    return [{ productId: row.productId, quantity: Number(row.quantity) || 0, finish: row.finish }]
+    return [{
+      productId: row.productId,
+      quantity: Number(row.quantity) || 0,
+      finish: row.finish,
+      customization: row.customization || undefined,
+    }]
   })
 }
 
@@ -168,12 +178,69 @@ export async function handleCouchkraftApi(
     !url.startsWith('/api/auth') &&
     !url.startsWith('/api/orders') &&
     !url.startsWith('/api/addresses') &&
-    !url.startsWith('/api/checkout')
+    !url.startsWith('/api/checkout') &&
+    !url.startsWith('/api/admin') &&
+    !url.startsWith('/api/products') &&
+    !url.startsWith('/api/banners') &&
+    !url.startsWith('/api/settings') &&
+    !url.startsWith('/api/custom-requests')
   ) {
     return false
   }
 
   try {
+          if (req.method === 'GET' && url === '/api/settings/public') {
+            const settings = await fetchLiveSettings()
+            return send(res, 200, {
+              whatsapp: {
+                businessPhone: settings.whatsapp?.businessPhone || '',
+                businessName: settings.whatsapp?.businessName || 'CouchKraft Bespoke Concierge',
+                enabled: settings.whatsapp?.enabled ?? true,
+                leadTimeWeeks: settings.whatsapp?.defaultLeadTimeWeeks || 4,
+              },
+            })
+          }
+
+          if (req.method === 'POST' && url === '/api/custom-requests') {
+            const body = await readBody(req)
+            const customerName = text(body, 'customerName').trim() || text(body, 'name').trim()
+            const customerPhone = text(body, 'customerPhone').trim() || text(body, 'phone').trim()
+            if (!customerPhone) {
+              return send(res, 400, { error: 'Please enter your phone number so our atelier can follow up.' })
+            }
+            const user = currentUser(req)
+            const created = await createCustomRequest({
+              customerId: user ? user.id : null,
+              customerName: customerName || (user ? user.name : 'Bespoke Client'),
+              customerEmail: text(body, 'customerEmail').trim() || text(body, 'email').trim() || (user ? user.email : ''),
+              customerPhone,
+              productId: text(body, 'productId'),
+              productName: text(body, 'productName'),
+              productUrl: text(body, 'productUrl'),
+              seatingCapacity: text(body, 'seatingCapacity'),
+              dimensions: typeof body.dimensions === 'object' ? (body.dimensions as any) : undefined,
+              material: text(body, 'material'),
+              fabric: text(body, 'fabric'),
+              color: text(body, 'color'),
+              budget: text(body, 'budget'),
+              notes: text(body, 'notes'),
+            })
+            return send(res, 201, { ok: true, request: created, message: 'Your bespoke furniture commission has been safely submitted.' })
+          }
+
+          if (url.startsWith('/api/admin')) {
+            const body = req.method !== 'GET' && req.method !== 'HEAD' ? await readBody(req) : {}
+            return handleAdminApi(req, res, url, body)
+          }
+
+          if (req.method === 'GET' && url === '/api/products') {
+            return send(res, 200, { products: readProducts() })
+          }
+
+          if (req.method === 'GET' && url === '/api/banners') {
+            return send(res, 200, { banners: readBanners() })
+          }
+
           if (req.method === 'GET' && url === '/api/auth/me') {
             const user = currentUser(req)
             return send(res, 200, { user: user ? publicCustomer(user) : null })
@@ -264,6 +331,43 @@ export async function handleCouchkraftApi(
               payload.devActionUrl = `${originFrom(req)}/account/verify?token=${issueVerifyToken(customer)}`
             }
             return send(res, 200, payload)
+          }
+
+          if (req.method === 'POST' && url === '/api/auth/verify-otp') {
+            const body = await readBody(req)
+            const email = text(body, 'email').trim()
+            const otp = text(body, 'otp').trim()
+
+            if (!email || !otp) {
+              return send(res, 400, { error: 'Please enter your email and verification code.' })
+            }
+
+            const isDev = process.env.NODE_ENV !== 'production'
+
+            if (!isDev) {
+              return send(res, 400, { error: 'Fixed demo OTP is disabled in production. Please use real verification.' })
+            }
+
+            if (otp !== '1234') {
+              return send(res, 400, { error: 'Invalid verification code. (In development demo mode, use demo OTP: 1234)' })
+            }
+
+            const customer = findByEmail(email)
+            if (!customer) {
+              return send(res, 404, { error: 'No account found for this email address.' })
+            }
+
+            customer.emailVerified = true
+            customer.verifyTokenHash = null
+            customer.verifyExpires = null
+            saveCustomer(customer)
+
+            setSession(res, customer.id)
+            return send(res, 200, {
+              ok: true,
+              message: 'Email successfully verified using Demo OTP (1234).',
+              user: publicCustomer(customer),
+            })
           }
 
           if (req.method === 'POST' && url === '/api/auth/verify') {
@@ -361,7 +465,7 @@ export async function handleCouchkraftApi(
               const fingerprint = cartFingerprint(items, coupon, `${address.line1}|${address.city}|${address.postalCode}`)
               let order = findReusableCheckoutOrder(user.id, fingerprint)
               if (!order) {
-                const created = createOrderFromCart(user.id, {
+                const created = await createOrderFromCart(user.id, {
                   items,
                   address,
                   coupon,
@@ -369,7 +473,7 @@ export async function handleCouchkraftApi(
                   paymentStatus: 'pending',
                   cartFingerprint: fingerprint,
                 })
-                if ('error' in created) return send(res, 400, { error: 'Your bag has no valid pieces to order.' })
+                if ('error' in created) return send(res, 400, { error: (created as any).message || 'Your bag has no valid pieces to order.' })
                 order = created.order
               }
               if (order.paymentStatus === 'paid') {
@@ -434,14 +538,14 @@ export async function handleCouchkraftApi(
               cash: 'Cash on delivery',
             }
             if (method === 'cash') {
-              const result = markCashOnDelivery(user.id, {
+              const result = await markCashOnDelivery(user.id, {
                 orderId,
                 razorpayOrderId: existing.razorpayOrderId,
               })
               if ('error' in result) return send(res, 400, { error: 'This payment does not match the order on your account.' })
               return send(res, 200, { order: result.order })
             }
-            const result = markOrderPaid(user.id, {
+            const result = await markOrderPaid(user.id, {
               orderId,
               razorpayOrderId: existing.razorpayOrderId,
               razorpayPaymentId: `pay_demo_${existing.id}`,
@@ -474,7 +578,7 @@ export async function handleCouchkraftApi(
               markOrderPaymentFailed(orderId, user.id, 'Payment signature could not be verified.')
               return send(res, 400, { error: 'Payment could not be verified. This order has not been marked as paid.' })
             }
-            const result = markOrderPaid(user.id, { orderId, razorpayOrderId, razorpayPaymentId })
+            const result = await markOrderPaid(user.id, { orderId, razorpayOrderId, razorpayPaymentId })
             if ('error' in result) {
               return send(res, result.error === 'missing' ? 404 : 400, {
                 error:
@@ -507,12 +611,12 @@ export async function handleCouchkraftApi(
             const address = addressId ? (user.addresses.find((entry) => entry.id === addressId) ?? null) : null
             if (addressId && !address) return send(res, 400, { error: 'Choose a saved address that belongs to you.' })
             const items = parseCartItems(body)
-            const created = createOrderFromCart(user.id, {
+            const created = await createOrderFromCart(user.id, {
               items,
               address,
               coupon: text(body, 'coupon') || null,
             })
-            if ('error' in created) return send(res, 400, { error: 'Your bag has no valid pieces to order.' })
+            if ('error' in created) return send(res, 400, { error: (created as any).message || 'Your bag has no valid pieces to order.' })
             return send(res, 201, { order: created.order })
           }
 
