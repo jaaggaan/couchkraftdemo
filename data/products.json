@@ -1,5 +1,599 @@
 [
   {
+    "id": "ck-product-mve2vifp",
+    "slug": "product",
+    "name": "Untitled Product",
+    "sku": "CK-GEN-MVE2VIFP",
+    "price": 0,
+    "compareAt": 0,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "description": "",
+    "shortExcerpt": "",
+    "category": "Living Room > Sofas & Couches",
+    "subCategory": "3-Seater Sofas",
+    "space": "living",
+    "tabs": [
+      "bestsellers",
+      "new"
+    ],
+    "images": [
+      "https://qzpnxxlwlphxdcdlbiph.supabase.co/storage/v1/object/public/products/product-1792343212139-0ci8f.png"
+    ],
+    "videoUrl": "",
+    "finishes": [
+      "Standard"
+    ],
+    "colorSwatches": [
+      {
+        "name": "Terracotta Rust",
+        "hex": "#B35438",
+        "skuCode": "SKU-TRC",
+        "active": true
+      },
+      {
+        "name": "Warm Ivory",
+        "hex": "#E8DFC9",
+        "skuCode": "SKU-WIV",
+        "active": true
+      }
+    ],
+    "care": "Vacuum gently with soft brush. Spot clean with dry solvent cleaner.",
+    "dimensions": {
+      "width": 200,
+      "depth": 90,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "50 kg",
+    "seatingCapacity": "3 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 0,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationOptions": {
+      "enabled": true,
+      "seatingOptions": [
+        {
+          "id": "2-seater",
+          "label": "2-Seater (Compact)",
+          "priceDelta": -8000,
+          "description": "Width 170cm"
+        },
+        {
+          "id": "3-seater",
+          "label": "3-Seater (Standard)",
+          "priceDelta": 0,
+          "description": "Width 220cm"
+        },
+        {
+          "id": "4-seater",
+          "label": "4-Seater (Grand)",
+          "priceDelta": 14000,
+          "description": "Width 270cm"
+        },
+        {
+          "id": "l-shape",
+          "label": "L-Shaped Sectional",
+          "priceDelta": 32000,
+          "description": "Chaise lounger configuration"
+        }
+      ],
+      "dimensionSpecs": {
+        "width": {
+          "enabled": true,
+          "min": 160,
+          "max": 280,
+          "step": 5,
+          "defaultVal": 200,
+          "unit": "cm",
+          "pricePerUnitDelta": 120
+        },
+        "depth": {
+          "enabled": true,
+          "min": 80,
+          "max": 110,
+          "step": 5,
+          "defaultVal": 90,
+          "unit": "cm"
+        },
+        "height": {
+          "enabled": true,
+          "min": 70,
+          "max": 95,
+          "step": 5,
+          "defaultVal": 80,
+          "unit": "cm"
+        }
+      },
+      "fabrics": [
+        {
+          "id": "boucle",
+          "label": "Heavy Textured Bouclé",
+          "priceDelta": 0,
+          "description": "Plush tactile warmth"
+        },
+        {
+          "id": "linen",
+          "label": "Belgian Linen Blend",
+          "priceDelta": 3500,
+          "description": "Stonewashed breathable luxury"
+        },
+        {
+          "id": "velvet",
+          "label": "Royal Velvet",
+          "priceDelta": 6000,
+          "description": "Stain-resistant architectural velvet"
+        },
+        {
+          "id": "leather",
+          "label": "Full-Grain Italian Leather",
+          "priceDelta": 28000,
+          "description": "Supple hand-finished leather"
+        }
+      ],
+      "colors": [
+        {
+          "id": "ivory",
+          "label": "Warm Ivory",
+          "swatchHex": "#E8DFC9",
+          "priceDelta": 0
+        },
+        {
+          "id": "rust",
+          "label": "Terracotta Rust",
+          "swatchHex": "#B35438",
+          "priceDelta": 0
+        },
+        {
+          "id": "moss",
+          "label": "Olive Moss",
+          "swatchHex": "#5D6B57",
+          "priceDelta": 0
+        },
+        {
+          "id": "taupe",
+          "label": "Muted Taupe",
+          "swatchHex": "#9C8F84",
+          "priceDelta": 0
+        }
+      ],
+      "finishes": [
+        {
+          "id": "nat-oak",
+          "label": "Natural White Oak",
+          "priceDelta": 0
+        },
+        {
+          "id": "walnut",
+          "label": "Dark American Walnut",
+          "priceDelta": 2500
+        }
+      ],
+      "materials": [
+        {
+          "id": "teak",
+          "label": "Kiln-Dried Teak Wood Frame",
+          "priceDelta": 0
+        },
+        {
+          "id": "sheesham",
+          "label": "Seasoned Sheesham Hardwood",
+          "priceDelta": -3000
+        }
+      ]
+    },
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Piece | CouchKraft",
+    "metaDescription": "",
+    "status": "published",
+    "unitsSold": 0,
+    "revenue": 0,
+    "createdAt": "2026-10-18T17:06:58.453Z",
+    "updatedAt": "2026-10-18T17:06:58.453Z"
+  },
+  {
+    "id": "ck-product-mve2v8hh",
+    "slug": "product",
+    "name": "Untitled Product",
+    "sku": "CK-GEN-MVE2V8HH",
+    "price": 0,
+    "compareAt": 0,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "description": "",
+    "shortExcerpt": "",
+    "category": "Living Room > Sofas & Couches",
+    "subCategory": "3-Seater Sofas",
+    "space": "living",
+    "tabs": [
+      "bestsellers",
+      "new"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "videoUrl": "",
+    "finishes": [
+      "Standard"
+    ],
+    "colorSwatches": [
+      {
+        "name": "Terracotta Rust",
+        "hex": "#B35438",
+        "skuCode": "SKU-TRC",
+        "active": true
+      },
+      {
+        "name": "Warm Ivory",
+        "hex": "#E8DFC9",
+        "skuCode": "SKU-WIV",
+        "active": true
+      }
+    ],
+    "care": "Vacuum gently with soft brush. Spot clean with dry solvent cleaner.",
+    "dimensions": {
+      "width": 200,
+      "depth": 90,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "50 kg",
+    "seatingCapacity": "3 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 0,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationOptions": {
+      "enabled": true,
+      "seatingOptions": [
+        {
+          "id": "2-seater",
+          "label": "2-Seater (Compact)",
+          "priceDelta": -8000,
+          "description": "Width 170cm"
+        },
+        {
+          "id": "3-seater",
+          "label": "3-Seater (Standard)",
+          "priceDelta": 0,
+          "description": "Width 220cm"
+        },
+        {
+          "id": "4-seater",
+          "label": "4-Seater (Grand)",
+          "priceDelta": 14000,
+          "description": "Width 270cm"
+        },
+        {
+          "id": "l-shape",
+          "label": "L-Shaped Sectional",
+          "priceDelta": 32000,
+          "description": "Chaise lounger configuration"
+        }
+      ],
+      "dimensionSpecs": {
+        "width": {
+          "enabled": true,
+          "min": 160,
+          "max": 280,
+          "step": 5,
+          "defaultVal": 200,
+          "unit": "cm",
+          "pricePerUnitDelta": 120
+        },
+        "depth": {
+          "enabled": true,
+          "min": 80,
+          "max": 110,
+          "step": 5,
+          "defaultVal": 90,
+          "unit": "cm"
+        },
+        "height": {
+          "enabled": true,
+          "min": 70,
+          "max": 95,
+          "step": 5,
+          "defaultVal": 80,
+          "unit": "cm"
+        }
+      },
+      "fabrics": [
+        {
+          "id": "boucle",
+          "label": "Heavy Textured Bouclé",
+          "priceDelta": 0,
+          "description": "Plush tactile warmth"
+        },
+        {
+          "id": "linen",
+          "label": "Belgian Linen Blend",
+          "priceDelta": 3500,
+          "description": "Stonewashed breathable luxury"
+        },
+        {
+          "id": "velvet",
+          "label": "Royal Velvet",
+          "priceDelta": 6000,
+          "description": "Stain-resistant architectural velvet"
+        },
+        {
+          "id": "leather",
+          "label": "Full-Grain Italian Leather",
+          "priceDelta": 28000,
+          "description": "Supple hand-finished leather"
+        }
+      ],
+      "colors": [
+        {
+          "id": "ivory",
+          "label": "Warm Ivory",
+          "swatchHex": "#E8DFC9",
+          "priceDelta": 0
+        },
+        {
+          "id": "rust",
+          "label": "Terracotta Rust",
+          "swatchHex": "#B35438",
+          "priceDelta": 0
+        },
+        {
+          "id": "moss",
+          "label": "Olive Moss",
+          "swatchHex": "#5D6B57",
+          "priceDelta": 0
+        },
+        {
+          "id": "taupe",
+          "label": "Muted Taupe",
+          "swatchHex": "#9C8F84",
+          "priceDelta": 0
+        }
+      ],
+      "finishes": [
+        {
+          "id": "nat-oak",
+          "label": "Natural White Oak",
+          "priceDelta": 0
+        },
+        {
+          "id": "walnut",
+          "label": "Dark American Walnut",
+          "priceDelta": 2500
+        }
+      ],
+      "materials": [
+        {
+          "id": "teak",
+          "label": "Kiln-Dried Teak Wood Frame",
+          "priceDelta": 0
+        },
+        {
+          "id": "sheesham",
+          "label": "Seasoned Sheesham Hardwood",
+          "priceDelta": -3000
+        }
+      ]
+    },
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "Piece | CouchKraft",
+    "metaDescription": "",
+    "status": "published",
+    "unitsSold": 0,
+    "revenue": 0,
+    "createdAt": "2026-10-18T17:06:45.557Z",
+    "updatedAt": "2026-10-18T17:06:45.557Z"
+  },
+  {
+    "id": "ck-couch-mve2u9xe",
+    "slug": "couch",
+    "name": "couch",
+    "sku": "CK-GEN-MVE2U9XE",
+    "price": 56999,
+    "compareAt": 67567,
+    "gstSlab": "18% GST (Standard Furniture)",
+    "hsnCode": "9403 6000",
+    "description": "",
+    "shortExcerpt": "",
+    "category": "Living Room > Sofas & Couches",
+    "subCategory": "3-Seater Sofas",
+    "space": "living",
+    "tabs": [
+      "bestsellers",
+      "new"
+    ],
+    "images": [
+      "https://qzpnxxlwlphxdcdlbiph.supabase.co/storage/v1/object/public/products/product-1792343127247-jatyc.png"
+    ],
+    "videoUrl": "",
+    "finishes": [
+      "Standard"
+    ],
+    "colorSwatches": [
+      {
+        "name": "Terracotta Rust",
+        "hex": "#B35438",
+        "skuCode": "SKU-TRC",
+        "active": true
+      },
+      {
+        "name": "Warm Ivory",
+        "hex": "#E8DFC9",
+        "skuCode": "SKU-WIV",
+        "active": true
+      }
+    ],
+    "care": "Vacuum gently with soft brush. Spot clean with dry solvent cleaner.",
+    "dimensions": {
+      "width": 200,
+      "depth": 90,
+      "height": 80,
+      "seatHeight": 42
+    },
+    "netWeight": "50 kg",
+    "seatingCapacity": "3 Persons",
+    "warranty": "5 Years Structural Frame",
+    "structuralWood": "Kiln-dried Teak & Sheesham Hardwood",
+    "foamUpholstery": "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    "readyToShipStock": 0,
+    "lowStockThreshold": 2,
+    "madeToOrder": true,
+    "leadTimeWeeks": 3,
+    "customizationEnabled": true,
+    "customizationOptions": {
+      "enabled": true,
+      "seatingOptions": [
+        {
+          "id": "2-seater",
+          "label": "2-Seater (Compact)",
+          "priceDelta": -8000,
+          "description": "Width 170cm"
+        },
+        {
+          "id": "3-seater",
+          "label": "3-Seater (Standard)",
+          "priceDelta": 0,
+          "description": "Width 220cm"
+        },
+        {
+          "id": "4-seater",
+          "label": "4-Seater (Grand)",
+          "priceDelta": 14000,
+          "description": "Width 270cm"
+        },
+        {
+          "id": "l-shape",
+          "label": "L-Shaped Sectional",
+          "priceDelta": 32000,
+          "description": "Chaise lounger configuration"
+        }
+      ],
+      "dimensionSpecs": {
+        "width": {
+          "enabled": true,
+          "min": 160,
+          "max": 280,
+          "step": 5,
+          "defaultVal": 200,
+          "unit": "cm",
+          "pricePerUnitDelta": 120
+        },
+        "depth": {
+          "enabled": true,
+          "min": 80,
+          "max": 110,
+          "step": 5,
+          "defaultVal": 90,
+          "unit": "cm"
+        },
+        "height": {
+          "enabled": true,
+          "min": 70,
+          "max": 95,
+          "step": 5,
+          "defaultVal": 80,
+          "unit": "cm"
+        }
+      },
+      "fabrics": [
+        {
+          "id": "boucle",
+          "label": "Heavy Textured Bouclé",
+          "priceDelta": 0,
+          "description": "Plush tactile warmth"
+        },
+        {
+          "id": "linen",
+          "label": "Belgian Linen Blend",
+          "priceDelta": 3500,
+          "description": "Stonewashed breathable luxury"
+        },
+        {
+          "id": "velvet",
+          "label": "Royal Velvet",
+          "priceDelta": 6000,
+          "description": "Stain-resistant architectural velvet"
+        },
+        {
+          "id": "leather",
+          "label": "Full-Grain Italian Leather",
+          "priceDelta": 28000,
+          "description": "Supple hand-finished leather"
+        }
+      ],
+      "colors": [
+        {
+          "id": "ivory",
+          "label": "Warm Ivory",
+          "swatchHex": "#E8DFC9",
+          "priceDelta": 0
+        },
+        {
+          "id": "rust",
+          "label": "Terracotta Rust",
+          "swatchHex": "#B35438",
+          "priceDelta": 0
+        },
+        {
+          "id": "moss",
+          "label": "Olive Moss",
+          "swatchHex": "#5D6B57",
+          "priceDelta": 0
+        },
+        {
+          "id": "taupe",
+          "label": "Muted Taupe",
+          "swatchHex": "#9C8F84",
+          "priceDelta": 0
+        }
+      ],
+      "finishes": [
+        {
+          "id": "nat-oak",
+          "label": "Natural White Oak",
+          "priceDelta": 0
+        },
+        {
+          "id": "walnut",
+          "label": "Dark American Walnut",
+          "priceDelta": 2500
+        }
+      ],
+      "materials": [
+        {
+          "id": "teak",
+          "label": "Kiln-Dried Teak Wood Frame",
+          "priceDelta": 0
+        },
+        {
+          "id": "sheesham",
+          "label": "Seasoned Sheesham Hardwood",
+          "priceDelta": -3000
+        }
+      ]
+    },
+    "customizationToleranceCm": 15,
+    "allowComUpholstery": true,
+    "metaTitle": "couch | CouchKraft",
+    "metaDescription": "",
+    "status": "published",
+    "unitsSold": 0,
+    "revenue": 0,
+    "createdAt": "2026-10-18T17:06:00.770Z",
+    "updatedAt": "2026-10-18T17:06:00.770Z"
+  },
+  {
     "id": "ck-arden-sofa",
     "slug": "arden-three-seater-sofa",
     "name": "Arden Three-Seater Sofa",

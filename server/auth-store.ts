@@ -1,9 +1,6 @@
 import { supabase } from './supabase-client.ts'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import bcrypt from 'bcryptjs'
-import { dataDirectory } from './data-path.ts'
 
 export type Address = {
   id: string
@@ -31,29 +28,6 @@ export type Customer = {
   addresses: Address[]
 }
 
-const dataDir = dataDirectory()
-const storePath = resolve(dataDir, 'customers.json')
-
-function ensureStore() {
-  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
-  if (!existsSync(storePath)) writeFileSync(storePath, '[]', 'utf8')
-}
-
-function readAll(): Customer[] {
-  ensureStore()
-  try {
-    const rows = JSON.parse(readFileSync(storePath, 'utf8')) as Customer[]
-    return rows.map((customer) => ({ ...customer, addresses: customer.addresses ?? [] }))
-  } catch {
-    return []
-  }
-}
-
-function writeAll(customers: Customer[]) {
-  ensureStore()
-  writeFileSync(storePath, JSON.stringify(customers, null, 2), 'utf8')
-}
-
 export function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex')
 }
@@ -69,12 +43,68 @@ export function tokensMatch(token: string, hash: string | null) {
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-export function findByEmail(email: string) {
-  return readAll().find((customer) => customer.email === email.toLowerCase().trim()) ?? null
+function fromCustomerDbRow(row: any): Customer {
+  return {
+    id: row.id,
+    name: row.name || '',
+    email: (row.email || '').toLowerCase().trim(),
+    phone: row.phone || '',
+    passwordHash: row.password_hash || '',
+    emailVerified: Boolean(row.email_verified),
+    verifyTokenHash: row.verify_token || null,
+    verifyExpires: row.verify_expires ? Number(row.verify_expires) : null,
+    resetTokenHash: row.reset_token || null,
+    resetExpires: row.reset_expires ? Number(row.reset_expires) : null,
+    createdAt: row.created_at || new Date().toISOString(),
+    addresses: Array.isArray(row.addresses) ? row.addresses : [],
+  }
 }
 
-export function findById(id: string) {
-  return readAll().find((customer) => customer.id === id) ?? null
+function toCustomerDbRow(c: Customer): Record<string, any> {
+  return {
+    id: c.id,
+    name: c.name,
+    email: c.email.toLowerCase().trim(),
+    phone: c.phone || '',
+    password_hash: c.passwordHash,
+    email_verified: c.emailVerified,
+    verify_token: c.verifyTokenHash,
+    reset_token: c.resetTokenHash,
+    reset_expires: c.resetExpires,
+    addresses: c.addresses || [],
+    updated_at: new Date().toISOString(),
+  }
+}
+
+export async function findByEmail(email: string): Promise<Customer | null> {
+  const cleanEmail = email.toLowerCase().trim()
+  if (!cleanEmail) return null
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('email', cleanEmail)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[AuthStore] Supabase findByEmail error:', error.message)
+    return null
+  }
+  return data ? fromCustomerDbRow(data) : null
+}
+
+export async function findById(id: string): Promise<Customer | null> {
+  if (!id) return null
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[AuthStore] Supabase findById error:', error.message)
+    return null
+  }
+  return data ? fromCustomerDbRow(data) : null
 }
 
 export function publicCustomer(customer: Customer) {
@@ -92,12 +122,13 @@ export async function createCustomer(input: {
   email: string
   phone: string
   password: string
-}) {
-  const customers = readAll()
+}): Promise<{ customer: Customer; verifyToken: string } | { error: 'duplicate' }> {
   const email = input.email.toLowerCase().trim()
-  if (customers.some((customer) => customer.email === email)) {
-    return { error: 'duplicate' as const }
+  const existing = await findByEmail(email)
+  if (existing) {
+    return { error: 'duplicate' }
   }
+
   const verifyToken = newToken()
   const customer: Customer = {
     id: randomBytes(12).toString('hex'),
@@ -113,42 +144,54 @@ export async function createCustomer(input: {
     createdAt: new Date().toISOString(),
     addresses: [],
   }
-  customers.push(customer)
-  writeAll(customers)
-  void syncCustomerToSupabase(customer)
-  return { customer, verifyToken }
+
+  const row = toCustomerDbRow(customer)
+  row.created_at = customer.createdAt
+
+  const { data, error } = await supabase.from('customers').insert([row]).select()
+  if (error) {
+    console.error('[AuthStore] Supabase createCustomer error:', error.message)
+    throw new Error(`Failed to create account in database: ${error.message}`)
+  }
+
+  return { customer: fromCustomerDbRow(data[0]), verifyToken }
 }
 
 export async function verifyPassword(customer: Customer, password: string) {
   return bcrypt.compare(password, customer.passwordHash)
 }
 
-export function saveCustomer(updated: Customer) {
-  const customers = readAll().map((customer) => (customer.id === updated.id ? updated : customer))
-  writeAll(customers)
-  void syncCustomerToSupabase(updated)
+export async function saveCustomer(updated: Customer): Promise<void> {
+  const row = toCustomerDbRow(updated)
+  const { error } = await supabase.from('customers').upsert([row], { onConflict: 'id' })
+  if (error) {
+    console.error('[AuthStore] Supabase saveCustomer error:', error.message)
+    throw new Error(`Failed to save customer in database: ${error.message}`)
+  }
 }
 
-export function updateProfile(
+export async function updateProfile(
   customer: Customer,
   input: { name: string; email: string; phone: string },
-) {
+): Promise<{ customer: Customer } | { error: 'duplicate' }> {
   const email = input.email.toLowerCase().trim()
-  const taken = findByEmail(email)
-  if (taken && taken.id !== customer.id) return { error: 'duplicate' as const }
+  if (email !== customer.email) {
+    const taken = await findByEmail(email)
+    if (taken && taken.id !== customer.id) return { error: 'duplicate' }
+  }
   const next: Customer = {
     ...customer,
     name: input.name.trim(),
     email,
     phone: input.phone.trim(),
   }
-  saveCustomer(next)
+  await saveCustomer(next)
   return { customer: next }
 }
 
-export function issueVerifyToken(customer: Customer) {
+export async function issueVerifyToken(customer: Customer): Promise<string> {
   const verifyToken = newToken()
-  saveCustomer({
+  await saveCustomer({
     ...customer,
     verifyTokenHash: hashToken(verifyToken),
     verifyExpires: Date.now() + 1000 * 60 * 60 * 24,
@@ -156,9 +199,9 @@ export function issueVerifyToken(customer: Customer) {
   return verifyToken
 }
 
-export function issueResetToken(customer: Customer) {
+export async function issueResetToken(customer: Customer): Promise<string> {
   const resetToken = newToken()
-  saveCustomer({
+  await saveCustomer({
     ...customer,
     resetTokenHash: hashToken(resetToken),
     resetExpires: Date.now() + 1000 * 60 * 30,
@@ -166,16 +209,32 @@ export function issueResetToken(customer: Customer) {
   return resetToken
 }
 
-export function findByVerifyToken(token: string) {
-  return readAll().find((customer) => tokensMatch(token, customer.verifyTokenHash)) ?? null
+export async function findByVerifyToken(token: string): Promise<Customer | null> {
+  const hashed = hashToken(token)
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('verify_token', hashed)
+    .maybeSingle()
+
+  if (error || !data) return null
+  return fromCustomerDbRow(data)
 }
 
-export function findByResetToken(token: string) {
-  return readAll().find((customer) => tokensMatch(token, customer.resetTokenHash)) ?? null
+export async function findByResetToken(token: string): Promise<Customer | null> {
+  const hashed = hashToken(token)
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('reset_token', hashed)
+    .maybeSingle()
+
+  if (error || !data) return null
+  return fromCustomerDbRow(data)
 }
 
-export async function setPassword(customer: Customer, password: string) {
-  saveCustomer({
+export async function setPassword(customer: Customer, password: string): Promise<void> {
+  await saveCustomer({
     ...customer,
     passwordHash: await bcrypt.hash(password, 12),
     resetTokenHash: null,
@@ -183,41 +242,87 @@ export async function setPassword(customer: Customer, password: string) {
   })
 }
 
-export function addAddress(customer: Customer, input: Omit<Address, 'id'>) {
+export async function addAddress(customer: Customer, input: Omit<Address, 'id'>): Promise<Address> {
   const address: Address = { ...input, id: randomBytes(8).toString('hex') }
-  saveCustomer({ ...customer, addresses: [...customer.addresses, address] })
+  await saveCustomer({ ...customer, addresses: [...customer.addresses, address] })
   return address
 }
 
-export function updateAddress(customer: Customer, addressId: string, input: Omit<Address, 'id'>) {
+export async function updateAddress(customer: Customer, addressId: string, input: Omit<Address, 'id'>): Promise<Address | null> {
   const addresses = customer.addresses.map((address) => (address.id === addressId ? { ...input, id: addressId } : address))
   if (!addresses.some((address) => address.id === addressId)) return null
-  saveCustomer({ ...customer, addresses })
+  await saveCustomer({ ...customer, addresses })
   return addresses.find((address) => address.id === addressId) ?? null
 }
 
-export function removeAddress(customer: Customer, addressId: string) {
+export async function removeAddress(customer: Customer, addressId: string): Promise<boolean> {
   if (!customer.addresses.some((address) => address.id === addressId)) return false
-  saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) })
+  await saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) })
   return true
 }
 
-export async function syncCustomerToSupabase(customer: Customer) {
+export async function sendEmailOtp(email: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    await supabase.from('customers').upsert([{
-      id: customer.id,
-      name: customer.name,
-      email: customer.email,
-      phone: customer.phone,
-      password_hash: customer.passwordHash,
-      email_verified: customer.emailVerified,
-      verify_token: customer.verifyTokenHash,
-      reset_token: customer.resetTokenHash,
-      reset_expires: customer.resetExpires,
-      addresses: customer.addresses || [],
-      created_at: customer.createdAt,
-    }], { onConflict: 'id' })
-  } catch (err) {
-    console.warn('[Supabase Customer Sync Warning]:', err)
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.toLowerCase().trim(),
+      options: { shouldCreateUser: true },
+    })
+    if (error) {
+      console.warn('[Supabase Auth OTP Send Warning]:', error.message)
+      return { ok: false, error: error.message }
+    }
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[Supabase Auth OTP Send Exception]:', err)
+    return { ok: false, error: err.message || 'Failed to dispatch email verification.' }
+  }
+}
+
+export async function verifyEmailOtp(email: string, token: string): Promise<{ ok: boolean; error?: string }> {
+  const cleanEmail = email.toLowerCase().trim()
+  const cleanToken = token.trim()
+
+  try {
+    let { data, error } = await supabase.auth.verifyOtp({
+      email: cleanEmail,
+      token: cleanToken,
+      type: 'email',
+    })
+
+    if (error || !data?.user) {
+      const fallback = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: 'signup',
+      })
+      if (!fallback.error && fallback.data?.user) {
+        data = fallback.data
+        error = null
+      }
+    }
+
+    if (error || !data?.user) {
+      return { ok: false, error: error?.message || 'Invalid or expired verification code.' }
+    }
+
+    return { ok: true }
+  } catch (err: any) {
+    return { ok: false, error: err.message || 'Verification failed.' }
+  }
+}
+
+export async function sendPasswordResetEmail(email: string, redirectTo?: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+      redirectTo,
+    })
+    if (error) {
+      console.warn('[Supabase Auth Reset Password Warning]:', error.message)
+      return { ok: false, error: error.message }
+    }
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[Supabase Auth Reset Password Exception]:', err)
+    return { ok: false, error: err.message || 'Failed to dispatch password reset email.' }
   }
 }

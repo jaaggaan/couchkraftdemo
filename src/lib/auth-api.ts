@@ -34,6 +34,7 @@ export const authApi = {
   updateProfile: (payload: { name: string; email: string; phone: string }) =>
     request('/api/auth/profile', payload, 'PUT'),
   login: (email: string, password: string) => request('/api/auth/login', { email, password }),
+  demoLogin: () => request('/api/auth/demo-login'),
   register: (payload: { name: string; email: string; phone: string; password: string; confirmPassword: string }) =>
     request('/api/auth/register', payload),
   logout: () => request('/api/auth/logout', {}),

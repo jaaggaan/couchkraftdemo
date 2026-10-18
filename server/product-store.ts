@@ -1,7 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { dataDirectory } from './data-path.ts'
-import { products as initialProducts, type Product as BaseProduct } from '../src/data/products.ts'
+import { supabase } from './supabase-client.ts'
+import type { Product as BaseProduct } from '../src/data/products.ts'
 
 export type ColorSwatch = {
   name: string
@@ -15,6 +13,7 @@ export type ProductDimensions = {
   depth: number
   height: number
   seatHeight: number
+  customizationOptions?: any
 }
 
 export type Product = BaseProduct & {
@@ -59,275 +58,324 @@ export type Category = {
   productCount: number
 }
 
-const dataDir = dataDirectory()
-const productsPath = resolve(dataDir, 'products.json')
-const categoriesPath = resolve(dataDir, 'categories.json')
-
-const initialCategories: Category[] = [
-  {
-    id: 'cat_sofas',
-    name: 'Living Room > Sofas & Couches',
-    slug: 'sofas-and-couches',
-    subClassifications: ['3-Seater Sofas', 'Sectionals & L-Shapes', 'Chesterfield Sofas', 'Modular Loungers'],
-    description: 'Artisanal sofas crafted from kiln-dried hardwood and organic Belgian fabrics.',
-    image: 'https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=600&q=80',
-    productCount: 1,
-  },
-  {
-    id: 'cat_chairs',
-    name: 'Bedroom > Lounge Chairs',
-    slug: 'lounge-chairs',
-    subClassifications: ['Accent Chairs', 'Recliners', 'Rocking Chairs'],
-    description: 'Sculptural seating designed for quiet reading and relaxed conversation.',
-    image: 'https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=600&q=80',
-    productCount: 1,
-  },
-  {
-    id: 'cat_storage',
-    name: 'Dining > Benches & Storage',
-    slug: 'benches-and-storage',
-    subClassifications: ['Sideboards', 'Credenzas', 'Dining Benches'],
-    description: 'Minimalist wooden storage units with architectural proportions.',
-    image: 'https://images.unsplash.com/photo-1611967164521-abae8fba4668?auto=format&fit=crop&w=600&q=80',
-    productCount: 1,
-  },
-  {
-    id: 'cat_accent',
-    name: 'Study > Accent Seating',
-    slug: 'accent-seating',
-    subClassifications: ['Daybeds', 'Ottomans', 'Chaise Lounges'],
-    description: 'Versatile handcrafted accent daybeds and sloped seating.',
-    image: 'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=600&q=80',
-    productCount: 1,
-  },
-]
-
-function ensureStore() {
-  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
-
-  if (!existsSync(categoriesPath)) {
-    writeFileSync(categoriesPath, JSON.stringify(initialCategories, null, 2), 'utf8')
+export function resolveCategoryId(categoryName: string, explicitId?: string): string {
+  if (explicitId && ['cat_sofas', 'cat_chairs', 'cat_storage', 'cat_accent'].includes(explicitId)) {
+    return explicitId
   }
-
-  if (!existsSync(productsPath)) {
-    const seeded: Product[] = initialProducts.map((p, idx) => {
-      const isArden = p.id === 'ck-arden-sofa'
-      return {
-        ...p,
-        sku: isArden ? 'CK-SOF-001' : `CK-PRD-${String(idx + 1).padStart(3, '0')}`,
-        price: isArden ? 78000 : p.price,
-        compareAt: isArden ? 95000 : Math.round(p.price * 1.2),
-        gstSlab: '18% GST (Standard Furniture)',
-        hsnCode: '9403 6000',
-        subCategory: isArden ? '3-Seater Sofas' : 'Standard',
-        shortExcerpt: isArden
-          ? 'Clean mid-century lines wrapped in natural woven textures. Ergonomic sloped cushions sculpted over sustainably sourced teakwood.'
-          : p.description.slice(0, 140),
-        description: isArden
-          ? 'The Arden Sofa embodies our philosophy of quiet luxury. Engineered for longevity, the structure integrates hand-carved kiln-dried teakwood arms with a supportive serpentine spring assembly. The cushions are enveloped in Belgian-milled linen blend fabric, resistant to piling and softly textured to the touch.\n\nEvery silhouette line is smoothed to architectural perfection, delivering a calm presence in both light-drenched contemporary apartments and storied traditional residences.'
-          : p.description,
-        videoUrl: isArden ? 'https://youtube.com/watch?v=couchkraft-arden-craft' : '',
-        colorSwatches: isArden
-          ? [
-              { name: 'Terracotta Rust', hex: '#B35438', skuCode: 'SKU-TRC', active: true },
-              { name: 'Warm Ivory', hex: '#E8DFC9', skuCode: 'SKU-WIV', active: true },
-              { name: 'Olive Green', hex: '#5D6B57', skuCode: 'SKU-OLV', active: true },
-              { name: 'Muted Taupe', hex: '#9C8F84', skuCode: 'SKU-MTP', active: true },
-            ]
-          : [
-              { name: 'Natural Oak', hex: '#D2B48C', skuCode: 'SKU-NAT', active: true },
-              { name: 'Warm Oat', hex: '#E5D3B3', skuCode: 'SKU-OAT', active: true },
-            ],
-        dimensions: isArden
-          ? { width: 215, depth: 92, height: 84, seatHeight: 44 }
-          : { width: 180, depth: 85, height: 80, seatHeight: 42 },
-        netWeight: isArden ? '58 kg' : '45 kg',
-        seatingCapacity: isArden ? '3 Persons (Max 360 kg)' : '2 Persons',
-        warranty: '5 Years Structural Frame',
-        structuralWood: 'Kiln-dried Teak & Sheesham Hardwood',
-        foamUpholstery: '38-Density Ultra-Cell Foam + Belgian Linen Blend',
-        readyToShipStock: isArden ? 8 : 4,
-        lowStockThreshold: 2,
-        madeToOrder: true,
-        leadTimeWeeks: 3,
-        customizationEnabled: true,
-        customizationToleranceCm: 15,
-        allowComUpholstery: true,
-        metaTitle: isArden
-          ? 'Arden Three-Seater Sofa | CouchKraft Bespoke Teak Living'
-          : `${p.name} | CouchKraft Artisanal Furniture`,
-        metaDescription: isArden
-          ? 'Buy the handcrafted Arden Three-Seater Sofa at CouchKraft. Solid kiln-dried teakwood frame wrapped in organic linen upholstery. Handcrafted in India with white-glove delivery.'
-          : p.description,
-        status: 'published',
-        unitsSold: isArden ? 24 : 12,
-        revenue: isArden ? 1872000 : 504000,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-    })
-    writeFileSync(productsPath, JSON.stringify(seeded, null, 2), 'utf8')
-  }
+  const lower = (categoryName || '').toLowerCase()
+  if (lower.includes('chair') || lower.includes('lounge')) return 'cat_chairs'
+  if (lower.includes('storage') || lower.includes('bench') || lower.includes('dining') || lower.includes('table') || lower.includes('sideboard')) return 'cat_storage'
+  if (lower.includes('accent') || lower.includes('study') || lower.includes('daybed') || lower.includes('bed') || lower.includes('mirror') || lower.includes('lighting') || lower.includes('light') || lower.includes('ottoman')) return 'cat_accent'
+  return 'cat_sofas'
 }
 
-export function readProducts(): Product[] {
-  ensureStore()
-  try {
-    return JSON.parse(readFileSync(productsPath, 'utf8')) as Product[]
-  } catch {
-    return []
-  }
-}
-
-export function writeProducts(products: Product[]) {
-  ensureStore()
-  writeFileSync(productsPath, JSON.stringify(products, null, 2), 'utf8')
-}
-
-export function findProductById(id: string): Product | null {
-  const products = readProducts()
-  return products.find((p) => p.id === id || p.slug === id) ?? null
-}
-
-export function createProduct(input: Partial<Product>): Product {
-  const products = readProducts()
-  const slug = (input.slug || input.name || 'product')
+function toProductDbRow(p: any): Record<string, any> {
+  const name = String(p.name || 'Untitled Piece').trim()
+  const slug = (p.slug || name || 'product')
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-  
-  const id = input.id || `ck-${slug}-${Date.now().toString(36)}`
-  const newProduct: Product = {
-    id,
+    .replace(/^-+|-+$/g, '')
+
+  const categoryName = p.category || 'Living Room > Sofas & Couches'
+  const categoryId = resolveCategoryId(categoryName, p.categoryId || p.category_id)
+
+  const dimensions = p.dimensions && typeof p.dimensions === 'object'
+    ? { ...p.dimensions }
+    : { width: 200, depth: 90, height: 80, seatHeight: 42 }
+
+  if (p.customizationOptions) {
+    dimensions.customizationOptions = p.customizationOptions
+  }
+
+  return {
+    id: p.id || `ck-${slug}-${Date.now().toString(36)}`,
     slug,
-    name: input.name || 'Untitled Product',
-    sku: input.sku || `CK-GEN-${Date.now().toString(36).toUpperCase()}`,
-    price: Number(input.price) || 0,
-    compareAt: Number(input.compareAt) || Math.round((Number(input.price) || 0) * 1.2),
-    gstSlab: input.gstSlab || '18% GST (Standard Furniture)',
-    hsnCode: input.hsnCode || '9403 6000',
-    description: input.description || '',
-    shortExcerpt: input.shortExcerpt || '',
-    category: input.category || 'Living Room > Sofas & Couches',
-    subCategory: input.subCategory || 'General',
-    space: input.space || 'living',
-    tabs: input.tabs || ['bestsellers', 'new'],
-    images: input.images && input.images.length ? input.images : [
+    name,
+    sku: p.sku || `CK-SKU-${Date.now().toString(36).toUpperCase()}`,
+    price: Number(p.price) || 0,
+    compare_at: Number(p.compareAt ?? p.compare_at) || 0,
+    category_id: categoryId,
+    category: categoryName,
+    sub_category: p.subCategory ?? p.sub_category ?? 'Standard',
+    space: p.space || 'living',
+    tabs: Array.isArray(p.tabs) ? p.tabs : ['bestsellers'],
+    short_excerpt: p.shortExcerpt ?? p.short_excerpt ?? '',
+    description: p.description || '',
+    images: Array.isArray(p.images) && p.images.length ? p.images : [
       'https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=1200&q=80'
     ],
-    videoUrl: input.videoUrl || '',
-    finishes: input.finishes || ['Standard'],
-    colorSwatches: input.colorSwatches || [
-      { name: 'Terracotta Rust', hex: '#B35438', skuCode: 'SKU-TRC', active: true },
-      { name: 'Warm Ivory', hex: '#E8DFC9', skuCode: 'SKU-WIV', active: true },
-    ],
-    care: input.care || 'Vacuum gently with soft brush. Spot clean with dry solvent cleaner.',
-    dimensions: input.dimensions || { width: 200, depth: 90, height: 80, seatHeight: 42 },
-    netWeight: input.netWeight || '50 kg',
-    seatingCapacity: input.seatingCapacity || '3 Persons',
-    warranty: input.warranty || '5 Years Structural Frame',
-    structuralWood: input.structuralWood || 'Kiln-dried Teak & Sheesham Hardwood',
-    foamUpholstery: input.foamUpholstery || '38-Density Ultra-Cell Foam + Belgian Linen Blend',
-    readyToShipStock: Number(input.readyToShipStock) || 0,
-    lowStockThreshold: Number(input.lowStockThreshold) || 2,
-    madeToOrder: input.madeToOrder ?? true,
-    leadTimeWeeks: Number(input.leadTimeWeeks) || 3,
-    customizationEnabled: input.customizationEnabled ?? true,
-    customizationOptions: input.customizationOptions || undefined,
-    customizationToleranceCm: Number(input.customizationToleranceCm) || 15,
-    allowComUpholstery: input.allowComUpholstery ?? true,
-    metaTitle: input.metaTitle || `${input.name || 'Piece'} | CouchKraft`,
-    metaDescription: input.metaDescription || (input.shortExcerpt || input.description || '').slice(0, 160),
-    status: input.status || 'published',
-    unitsSold: Number(input.unitsSold) || 0,
-    revenue: Number(input.revenue) || 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    video_url: p.videoUrl ?? p.video_url ?? '',
+    finishes: Array.isArray(p.finishes) ? p.finishes : ['Standard'],
+    color_swatches: Array.isArray(p.colorSwatches ?? p.color_swatches) ? (p.colorSwatches ?? p.color_swatches) : [],
+    care: p.care || '',
+    dimensions,
+    net_weight: p.netWeight ?? p.net_weight ?? '50 kg',
+    seating_capacity: p.seatingCapacity ?? p.seating_capacity ?? '3 Persons',
+    warranty: p.warranty || '5 Years Structural Frame',
+    structural_wood: p.structuralWood ?? p.structural_wood ?? 'Kiln-dried Teak & Sheesham Hardwood',
+    foam_upholstery: p.foamUpholstery ?? p.foam_upholstery ?? '38-Density Ultra-Cell Foam + Belgian Linen Blend',
+    ready_to_ship_stock: Number(p.readyToShipStock ?? p.ready_to_ship_stock) || 0,
+    low_stock_threshold: Number(p.lowStockThreshold ?? p.low_stock_threshold) || 2,
+    made_to_order: p.madeToOrder ?? p.made_to_order ?? true,
+    lead_time_weeks: Number(p.leadTimeWeeks ?? p.lead_time_weeks) || 3,
+    customization_enabled: p.customizationEnabled ?? p.customization_enabled ?? true,
+    customization_tolerance_cm: Number(p.customizationToleranceCm ?? p.customization_tolerance_cm) || 15,
+    allow_com_upholstery: p.allowComUpholstery ?? p.allow_com_upholstery ?? true,
+    meta_title: p.metaTitle ?? p.meta_title ?? `${name} | CouchKraft`,
+    meta_description: p.metaDescription ?? p.meta_description ?? (p.shortExcerpt || p.description || '').slice(0, 160),
+    status: p.status || 'published',
+    gst_slab: p.gstSlab ?? p.gst_slab ?? '18% GST (Standard Furniture)',
+    hsn_code: p.hsnCode ?? p.hsn_code ?? '9403 6000',
   }
-
-  products.unshift(newProduct)
-  writeProducts(products)
-  return newProduct
 }
 
-export function updateProduct(id: string, updates: Partial<Product>): Product | null {
-  const products = readProducts()
-  const idx = products.findIndex((p) => p.id === id || p.slug === id)
-  if (idx === -1) return null
+function fromProductDbRow(row: any): Product {
+  const dims = row.dimensions && typeof row.dimensions === 'object' ? row.dimensions : { width: 200, depth: 90, height: 80, seatHeight: 42 }
+  const customizationOptions = row.customization_options ?? dims.customizationOptions ?? undefined
 
-  const existing = products[idx]
-  const updated: Product = {
-    ...existing,
-    ...updates,
-    id: existing.id,
-    updatedAt: new Date().toISOString(),
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    sku: row.sku || '',
+    price: Number(row.price) || 0,
+    compareAt: Number(row.compare_at ?? row.compareAt) || 0,
+    gstSlab: row.gst_slab ?? row.gstSlab ?? '18% GST (Standard Furniture)',
+    hsnCode: row.hsn_code ?? row.hsnCode ?? '9403 6000',
+    description: row.description || '',
+    shortExcerpt: row.short_excerpt ?? row.shortExcerpt ?? '',
+    category: row.category || 'Living Room > Sofas & Couches',
+    subCategory: row.sub_category ?? row.subCategory ?? 'Standard',
+    space: row.space || 'living',
+    tabs: Array.isArray(row.tabs) ? row.tabs : ['bestsellers'],
+    images: Array.isArray(row.images) && row.images.length ? row.images : [],
+    videoUrl: row.video_url ?? row.videoUrl ?? '',
+    finishes: Array.isArray(row.finishes) ? row.finishes : ['Standard'],
+    colorSwatches: Array.isArray(row.color_swatches ?? row.colorSwatches) ? (row.color_swatches ?? row.colorSwatches) : [],
+    care: row.care || '',
+    dimensions: {
+      width: Number(dims.width) || 200,
+      depth: Number(dims.depth) || 90,
+      height: Number(dims.height) || 80,
+      seatHeight: Number(dims.seatHeight) || 42,
+    },
+    netWeight: row.net_weight ?? row.netWeight ?? '50 kg',
+    seatingCapacity: row.seating_capacity ?? row.seatingCapacity ?? '3 Persons',
+    warranty: row.warranty || '5 Years Structural Frame',
+    structuralWood: row.structural_wood ?? row.structuralWood ?? 'Kiln-dried Teak & Sheesham Hardwood',
+    foamUpholstery: row.foam_upholstery ?? row.foamUpholstery ?? '38-Density Ultra-Cell Foam + Belgian Linen Blend',
+    readyToShipStock: Number(row.ready_to_ship_stock ?? row.readyToShipStock) || 0,
+    lowStockThreshold: Number(row.low_stock_threshold ?? row.lowStockThreshold) || 2,
+    madeToOrder: row.made_to_order ?? row.madeToOrder ?? true,
+    leadTimeWeeks: Number(row.lead_time_weeks ?? row.leadTimeWeeks) || 3,
+    customizationEnabled: row.customization_enabled ?? row.customizationEnabled ?? true,
+    customizationOptions,
+    customizationToleranceCm: Number(row.customization_tolerance_cm ?? row.customizationToleranceCm) || 15,
+    allowComUpholstery: row.allow_com_upholstery ?? row.allowComUpholstery ?? true,
+    metaTitle: row.meta_title ?? row.metaTitle ?? `${row.name} | CouchKraft`,
+    metaDescription: row.meta_description ?? row.metaDescription ?? '',
+    status: row.status || 'published',
+    unitsSold: Number(row.units_sold ?? row.unitsSold) || 0,
+    revenue: Number(row.revenue) || 0,
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
   }
-  products[idx] = updated
-  writeProducts(products)
-  return updated
 }
 
-export function deleteProduct(id: string): boolean {
-  const products = readProducts()
-  const filtered = products.filter((p) => p.id !== id && p.slug !== id)
-  if (filtered.length === products.length) return false
-  writeProducts(filtered)
+export async function readProducts(): Promise<Product[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[ProductStore] Supabase read error:', error.message)
+    throw new Error(`Failed to read products from Supabase: ${error.message}`)
+  }
+
+  return (data || []).map(fromProductDbRow)
+}
+
+export async function findProductById(id: string): Promise<Product | null> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .or(`id.eq.${id},slug.eq.${id}`)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[ProductStore] Supabase findProductById error:', error.message)
+    return null
+  }
+
+  return data ? fromProductDbRow(data) : null
+}
+
+export async function createProduct(input: Partial<Product>): Promise<Product> {
+  if (!input.name || !input.name.trim()) {
+    throw new Error('Product name is required.')
+  }
+
+  const row = toProductDbRow(input)
+  const { data, error } = await supabase
+    .from('products')
+    .insert([row])
+    .select()
+
+  if (error) {
+    console.error('[ProductStore] Supabase createProduct error:', error.message)
+    throw new Error(`Database error creating product: ${error.message}`)
+  }
+
+  if (!data || !data.length) {
+    throw new Error('Failed to create product in database.')
+  }
+
+  return fromProductDbRow(data[0])
+}
+
+export async function updateProduct(id: string, updates: Partial<Product>): Promise<Product | null> {
+  const row = toProductDbRow({ ...updates, id })
+  const { id: _, ...updatePayload } = row
+
+  const { data, error } = await supabase
+    .from('products')
+    .update({ ...updatePayload, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+
+  if (error) {
+    console.error('[ProductStore] Supabase updateProduct error:', error.message)
+    throw new Error(`Database error updating product: ${error.message}`)
+  }
+
+  if (!data || !data.length) {
+    return null
+  }
+
+  return fromProductDbRow(data[0])
+}
+
+export async function deleteProduct(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('id', id)
+
+  if (error) {
+    console.error('[ProductStore] Supabase deleteProduct error:', error.message)
+    throw new Error(`Database error deleting product: ${error.message}`)
+  }
+
   return true
 }
 
-export function readCategories(): Category[] {
-  ensureStore()
-  try {
-    const categories = JSON.parse(readFileSync(categoriesPath, 'utf8')) as Category[]
-    const products = readProducts()
-    return categories.map((cat) => ({
-      ...cat,
-      productCount: products.filter((p) => p.category === cat.name || p.category.includes(cat.name.split('>')[0].trim())).length,
-    }))
-  } catch {
-    return []
+export async function readCategories(): Promise<Category[]> {
+  const [catsRes, prodsRes] = await Promise.all([
+    supabase.from('categories').select('*').order('name'),
+    supabase.from('products').select('category, category_id'),
+  ])
+
+  if (catsRes.error) {
+    console.error('[ProductStore] Supabase readCategories error:', catsRes.error.message)
+    throw new Error(`Database error reading categories: ${catsRes.error.message}`)
   }
+
+  const products = prodsRes.data || []
+
+  return (catsRes.data || []).map((cat: any) => ({
+    id: cat.id,
+    name: cat.name,
+    slug: cat.slug,
+    subClassifications: cat.sub_classifications || [],
+    description: cat.description || '',
+    image: cat.image || '',
+    productCount: products.filter(
+      (p: any) => p.category_id === cat.id || p.category === cat.name || p.category?.includes(cat.name.split('>')[0].trim())
+    ).length,
+  }))
 }
 
-export function writeCategories(categories: Category[]) {
-  ensureStore()
-  writeFileSync(categoriesPath, JSON.stringify(categories, null, 2), 'utf8')
-}
-
-export function createCategory(input: Partial<Category>): Category {
-  const categories = readCategories()
+export async function createCategory(input: Partial<Category>): Promise<Category> {
   const slug = (input.slug || input.name || 'category')
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
-  const newCat: Category = {
+
+  const newCat = {
     id: input.id || `cat_${Date.now()}`,
     name: input.name || 'New Category',
     slug,
-    subClassifications: input.subClassifications || [],
+    sub_classifications: input.subClassifications || [],
     description: input.description || '',
     image: input.image || 'https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=600&q=80',
+    product_count: 0,
+  }
+
+  const { data, error } = await supabase
+    .from('categories')
+    .insert([newCat])
+    .select()
+
+  if (error) {
+    console.error('[ProductStore] Supabase createCategory error:', error.message)
+    throw new Error(`Database error creating category: ${error.message}`)
+  }
+
+  return {
+    id: data[0].id,
+    name: data[0].name,
+    slug: data[0].slug,
+    subClassifications: data[0].sub_classifications || [],
+    description: data[0].description || '',
+    image: data[0].image || '',
     productCount: 0,
   }
-  categories.push(newCat)
-  writeCategories(categories)
-  return newCat
 }
 
-export function updateCategory(id: string, updates: Partial<Category>): Category | null {
-  const categories = readCategories()
-  const idx = categories.findIndex((c) => c.id === id || c.slug === id)
-  if (idx === -1) return null
-  categories[idx] = { ...categories[idx], ...updates, id: categories[idx].id }
-  writeCategories(categories)
-  return categories[idx]
+export async function updateCategory(id: string, updates: Partial<Category>): Promise<Category | null> {
+  const patch: Record<string, any> = {}
+  if (updates.name !== undefined) patch.name = updates.name
+  if (updates.slug !== undefined) patch.slug = updates.slug
+  if (updates.subClassifications !== undefined) patch.sub_classifications = updates.subClassifications
+  if (updates.description !== undefined) patch.description = updates.description
+  if (updates.image !== undefined) patch.image = updates.image
+
+  const { data, error } = await supabase
+    .from('categories')
+    .update(patch)
+    .eq('id', id)
+    .select()
+
+  if (error) {
+    console.error('[ProductStore] Supabase updateCategory error:', error.message)
+    throw new Error(`Database error updating category: ${error.message}`)
+  }
+
+  if (!data || !data.length) return null
+
+  return {
+    id: data[0].id,
+    name: data[0].name,
+    slug: data[0].slug,
+    subClassifications: data[0].sub_classifications || [],
+    description: data[0].description || '',
+    image: data[0].image || '',
+    productCount: 0,
+  }
 }
 
-export function deleteCategory(id: string): boolean {
-  const categories = readCategories()
-  const filtered = categories.filter((c) => c.id !== id && c.slug !== id)
-  if (filtered.length === categories.length) return false
-  writeCategories(filtered)
+export async function deleteCategory(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('categories')
+    .delete()
+    .eq('id', id)
+
+  if (error) {
+    console.error('[ProductStore] Supabase deleteCategory error:', error.message)
+    throw new Error(`Database error deleting category: ${error.message}`)
+  }
+
   return true
 }

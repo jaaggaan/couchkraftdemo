@@ -16,33 +16,56 @@ async function backendRequest<T>(url: string, opts: RequestInit = {}): Promise<T
   return data as T
 }
 
+function resolveCategoryId(categoryName: string, explicitId?: string): string {
+  if (explicitId && ['cat_sofas', 'cat_chairs', 'cat_storage', 'cat_accent'].includes(explicitId)) {
+    return explicitId
+  }
+  const lower = (categoryName || '').toLowerCase()
+  if (lower.includes('chair') || lower.includes('lounge')) return 'cat_chairs'
+  if (lower.includes('storage') || lower.includes('bench') || lower.includes('dining') || lower.includes('table') || lower.includes('sideboard')) return 'cat_storage'
+  if (lower.includes('accent') || lower.includes('study') || lower.includes('daybed') || lower.includes('bed') || lower.includes('mirror') || lower.includes('lighting') || lower.includes('light') || lower.includes('ottoman')) return 'cat_accent'
+  return 'cat_sofas'
+}
+
 function toProductDbRow(p: any): Record<string, any> {
-  const slug = (p.slug || p.name || 'product')
+  const name = String(p.name || 'Untitled Product').trim()
+  const slug = (p.slug || name || 'product')
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
 
+  const categoryName = p.category || 'Living Room > Sofas & Couches'
+  const categoryId = resolveCategoryId(categoryName, p.categoryId || p.category_id)
+
+  const dimensions = p.dimensions && typeof p.dimensions === 'object'
+    ? { ...p.dimensions }
+    : { width: 200, depth: 90, height: 80, seatHeight: 42 }
+
+  if (p.customizationOptions) {
+    dimensions.customizationOptions = p.customizationOptions
+  }
+
   return {
     id: p.id || `ck-${slug}-${Date.now().toString(36)}`,
     slug,
-    name: p.name || 'Untitled Product',
+    name,
     sku: p.sku || `CK-SKU-${Date.now().toString(36).toUpperCase()}`,
     price: Number(p.price) || 0,
     compare_at: Number(p.compareAt ?? p.compare_at) || 0,
-    category_id: p.categoryId ?? p.category_id ?? 'cat_sofas',
-    category: p.category || 'Living Room > Sofas & Couches',
+    category_id: categoryId,
+    category: categoryName,
     sub_category: p.subCategory ?? p.sub_category ?? 'Standard',
     space: p.space || 'living',
-    tabs: p.tabs || ['bestsellers'],
+    tabs: Array.isArray(p.tabs) ? p.tabs : ['bestsellers'],
     short_excerpt: p.shortExcerpt ?? p.short_excerpt ?? '',
     description: p.description || '',
     images: Array.isArray(p.images) ? p.images : [],
     video_url: p.videoUrl ?? p.video_url ?? '',
-    finishes: p.finishes || ['Standard'],
+    finishes: Array.isArray(p.finishes) ? p.finishes : ['Standard'],
     color_swatches: p.colorSwatches ?? p.color_swatches ?? [],
     care: p.care || '',
-    dimensions: p.dimensions || { width: 200, depth: 90, height: 80, seatHeight: 42 },
+    dimensions,
     net_weight: p.netWeight ?? p.net_weight ?? '50 kg',
     seating_capacity: p.seatingCapacity ?? p.seating_capacity ?? '3 Persons',
     warranty: p.warranty || '5 Years Structural Frame',
@@ -53,10 +76,9 @@ function toProductDbRow(p: any): Record<string, any> {
     made_to_order: p.madeToOrder ?? p.made_to_order ?? true,
     lead_time_weeks: Number(p.leadTimeWeeks ?? p.lead_time_weeks) || 3,
     customization_enabled: p.customizationEnabled ?? p.customization_enabled ?? true,
-    customization_options: p.customizationOptions ?? p.customization_options ?? {},
     customization_tolerance_cm: Number(p.customizationToleranceCm ?? p.customization_tolerance_cm) || 15,
     allow_com_upholstery: p.allowComUpholstery ?? p.allow_com_upholstery ?? true,
-    meta_title: p.metaTitle ?? p.meta_title ?? `${p.name || 'Product'} | CouchKraft`,
+    meta_title: p.metaTitle ?? p.meta_title ?? `${name} | CouchKraft`,
     meta_description: p.metaDescription ?? p.meta_description ?? '',
     status: p.status || 'published',
     gst_slab: p.gstSlab ?? p.gst_slab ?? '18% GST (Standard Furniture)',
@@ -65,6 +87,7 @@ function toProductDbRow(p: any): Record<string, any> {
 }
 
 function fromProductDbRow(row: any): Record<string, any> {
+  const dims = row.dimensions && typeof row.dimensions === 'object' ? row.dimensions : { width: 200, depth: 90, height: 80, seatHeight: 42 }
   return {
     ...row,
     compareAt: Number(row.compare_at ?? row.compareAt) || 0,
@@ -81,7 +104,7 @@ function fromProductDbRow(row: any): Record<string, any> {
     madeToOrder: row.made_to_order ?? row.madeToOrder ?? true,
     leadTimeWeeks: Number(row.lead_time_weeks ?? row.leadTimeWeeks) || 3,
     customizationEnabled: row.customization_enabled ?? row.customizationEnabled ?? true,
-    customizationOptions: row.customization_options ?? row.customizationOptions ?? {},
+    customizationOptions: row.customization_options ?? dims.customizationOptions ?? row.customizationOptions ?? {},
     customizationToleranceCm: Number(row.customization_tolerance_cm ?? row.customizationToleranceCm) || 15,
     allowComUpholstery: row.allow_com_upholstery ?? row.allowComUpholstery ?? true,
     metaTitle: row.meta_title ?? row.metaTitle ?? '',
@@ -91,7 +114,6 @@ function fromProductDbRow(row: any): Record<string, any> {
     categoryId: row.category_id ?? row.categoryId ?? 'cat_sofas',
   }
 }
-
 function normalizeOrder(o: any) {
   const items = Array.isArray(o.items) ? o.items : []
   return {
@@ -217,24 +239,35 @@ export const adminApi = {
   },
 
   createProduct: async (data: any) => {
+    const row = toProductDbRow(data)
     try {
-      const row = toProductDbRow(data)
       const { data: inserted, error } = await supabase.from('products').insert([row]).select()
       if (!error && inserted && inserted.length) {
         return { ok: true, product: fromProductDbRow(inserted[0]) }
       }
-    } catch {}
+      if (error) {
+        console.warn('Supabase browser insert error, delegating to backend API:', error.message)
+      }
+    } catch (err: any) {
+      console.warn('Supabase browser insert exception, delegating to backend API:', err.message)
+    }
     return backendRequest(`${BASE}/products`, { method: 'POST', body: JSON.stringify(data) })
   },
 
   updateProduct: async (id: string, data: any) => {
+    const row = toProductDbRow({ ...data, id })
+    const { id: _, ...updatePayload } = row
     try {
-      const row = toProductDbRow({ ...data, id })
-      const { data: updated, error } = await supabase.from('products').update(row).eq('id', id).select()
+      const { data: updated, error } = await supabase.from('products').update({ ...updatePayload, updated_at: new Date().toISOString() }).eq('id', id).select()
       if (!error && updated && updated.length) {
         return { ok: true, product: fromProductDbRow(updated[0]) }
       }
-    } catch {}
+      if (error) {
+        console.warn('Supabase browser update error, delegating to backend API:', error.message)
+      }
+    } catch (err: any) {
+      console.warn('Supabase browser update exception, delegating to backend API:', err.message)
+    }
     return backendRequest(`${BASE}/products/${id}`, { method: 'PUT', body: JSON.stringify(data) })
   },
 
@@ -242,7 +275,10 @@ export const adminApi = {
     try {
       const { error } = await supabase.from('products').delete().eq('id', id)
       if (!error) return { ok: true }
-    } catch {}
+      console.warn('Supabase browser delete error, delegating to backend API:', error.message)
+    } catch (err: any) {
+      console.warn('Supabase browser delete exception, delegating to backend API:', err.message)
+    }
     return backendRequest(`${BASE}/products/${id}`, { method: 'DELETE' })
   },
 

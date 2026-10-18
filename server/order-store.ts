@@ -145,7 +145,7 @@ async function ensureCustomerInSupabase(customerId: string): Promise<string | nu
       .maybeSingle()
     if (existing?.id) return existing.id
 
-    const localUser = findById(customerId)
+    const localUser = await findById(customerId)
     if (localUser) {
       const { data: inserted, error } = await supabase.from('customers').insert([{
         id: localUser.id,

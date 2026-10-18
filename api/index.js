@@ -196,8 +196,8 @@ async function updateCustomRequestStatus(id, updates) {
 }
 
 // server/admin-api-handler.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync6 } from "node:fs";
-import { resolve as resolve7 } from "node:path";
+import { existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync5 } from "node:fs";
+import { resolve as resolve6 } from "node:path";
 import bcrypt2 from "bcryptjs";
 
 // server/admin-store.ts
@@ -304,8 +304,1146 @@ function getAuditLogs(limit = 50) {
 }
 
 // server/product-store.ts
+function resolveCategoryId(categoryName, explicitId) {
+  if (explicitId && ["cat_sofas", "cat_chairs", "cat_storage", "cat_accent"].includes(explicitId)) {
+    return explicitId;
+  }
+  const lower = (categoryName || "").toLowerCase();
+  if (lower.includes("chair") || lower.includes("lounge")) return "cat_chairs";
+  if (lower.includes("storage") || lower.includes("bench") || lower.includes("dining") || lower.includes("table") || lower.includes("sideboard")) return "cat_storage";
+  if (lower.includes("accent") || lower.includes("study") || lower.includes("daybed") || lower.includes("bed") || lower.includes("mirror") || lower.includes("lighting") || lower.includes("light") || lower.includes("ottoman")) return "cat_accent";
+  return "cat_sofas";
+}
+function toProductDbRow(p) {
+  const name = String(p.name || "Untitled Piece").trim();
+  const slug = (p.slug || name || "product").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const categoryName = p.category || "Living Room > Sofas & Couches";
+  const categoryId = resolveCategoryId(categoryName, p.categoryId || p.category_id);
+  const dimensions = p.dimensions && typeof p.dimensions === "object" ? { ...p.dimensions } : { width: 200, depth: 90, height: 80, seatHeight: 42 };
+  if (p.customizationOptions) {
+    dimensions.customizationOptions = p.customizationOptions;
+  }
+  return {
+    id: p.id || `ck-${slug}-${Date.now().toString(36)}`,
+    slug,
+    name,
+    sku: p.sku || `CK-SKU-${Date.now().toString(36).toUpperCase()}`,
+    price: Number(p.price) || 0,
+    compare_at: Number(p.compareAt ?? p.compare_at) || 0,
+    category_id: categoryId,
+    category: categoryName,
+    sub_category: p.subCategory ?? p.sub_category ?? "Standard",
+    space: p.space || "living",
+    tabs: Array.isArray(p.tabs) ? p.tabs : ["bestsellers"],
+    short_excerpt: p.shortExcerpt ?? p.short_excerpt ?? "",
+    description: p.description || "",
+    images: Array.isArray(p.images) && p.images.length ? p.images : [
+      "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=1200&q=80"
+    ],
+    video_url: p.videoUrl ?? p.video_url ?? "",
+    finishes: Array.isArray(p.finishes) ? p.finishes : ["Standard"],
+    color_swatches: Array.isArray(p.colorSwatches ?? p.color_swatches) ? p.colorSwatches ?? p.color_swatches : [],
+    care: p.care || "",
+    dimensions,
+    net_weight: p.netWeight ?? p.net_weight ?? "50 kg",
+    seating_capacity: p.seatingCapacity ?? p.seating_capacity ?? "3 Persons",
+    warranty: p.warranty || "5 Years Structural Frame",
+    structural_wood: p.structuralWood ?? p.structural_wood ?? "Kiln-dried Teak & Sheesham Hardwood",
+    foam_upholstery: p.foamUpholstery ?? p.foam_upholstery ?? "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    ready_to_ship_stock: Number(p.readyToShipStock ?? p.ready_to_ship_stock) || 0,
+    low_stock_threshold: Number(p.lowStockThreshold ?? p.low_stock_threshold) || 2,
+    made_to_order: p.madeToOrder ?? p.made_to_order ?? true,
+    lead_time_weeks: Number(p.leadTimeWeeks ?? p.lead_time_weeks) || 3,
+    customization_enabled: p.customizationEnabled ?? p.customization_enabled ?? true,
+    customization_tolerance_cm: Number(p.customizationToleranceCm ?? p.customization_tolerance_cm) || 15,
+    allow_com_upholstery: p.allowComUpholstery ?? p.allow_com_upholstery ?? true,
+    meta_title: p.metaTitle ?? p.meta_title ?? `${name} | CouchKraft`,
+    meta_description: p.metaDescription ?? p.meta_description ?? (p.shortExcerpt || p.description || "").slice(0, 160),
+    status: p.status || "published",
+    gst_slab: p.gstSlab ?? p.gst_slab ?? "18% GST (Standard Furniture)",
+    hsn_code: p.hsnCode ?? p.hsn_code ?? "9403 6000"
+  };
+}
+function fromProductDbRow(row) {
+  const dims = row.dimensions && typeof row.dimensions === "object" ? row.dimensions : { width: 200, depth: 90, height: 80, seatHeight: 42 };
+  const customizationOptions = row.customization_options ?? dims.customizationOptions ?? void 0;
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    sku: row.sku || "",
+    price: Number(row.price) || 0,
+    compareAt: Number(row.compare_at ?? row.compareAt) || 0,
+    gstSlab: row.gst_slab ?? row.gstSlab ?? "18% GST (Standard Furniture)",
+    hsnCode: row.hsn_code ?? row.hsnCode ?? "9403 6000",
+    description: row.description || "",
+    shortExcerpt: row.short_excerpt ?? row.shortExcerpt ?? "",
+    category: row.category || "Living Room > Sofas & Couches",
+    subCategory: row.sub_category ?? row.subCategory ?? "Standard",
+    space: row.space || "living",
+    tabs: Array.isArray(row.tabs) ? row.tabs : ["bestsellers"],
+    images: Array.isArray(row.images) && row.images.length ? row.images : [],
+    videoUrl: row.video_url ?? row.videoUrl ?? "",
+    finishes: Array.isArray(row.finishes) ? row.finishes : ["Standard"],
+    colorSwatches: Array.isArray(row.color_swatches ?? row.colorSwatches) ? row.color_swatches ?? row.colorSwatches : [],
+    care: row.care || "",
+    dimensions: {
+      width: Number(dims.width) || 200,
+      depth: Number(dims.depth) || 90,
+      height: Number(dims.height) || 80,
+      seatHeight: Number(dims.seatHeight) || 42
+    },
+    netWeight: row.net_weight ?? row.netWeight ?? "50 kg",
+    seatingCapacity: row.seating_capacity ?? row.seatingCapacity ?? "3 Persons",
+    warranty: row.warranty || "5 Years Structural Frame",
+    structuralWood: row.structural_wood ?? row.structuralWood ?? "Kiln-dried Teak & Sheesham Hardwood",
+    foamUpholstery: row.foam_upholstery ?? row.foamUpholstery ?? "38-Density Ultra-Cell Foam + Belgian Linen Blend",
+    readyToShipStock: Number(row.ready_to_ship_stock ?? row.readyToShipStock) || 0,
+    lowStockThreshold: Number(row.low_stock_threshold ?? row.lowStockThreshold) || 2,
+    madeToOrder: row.made_to_order ?? row.madeToOrder ?? true,
+    leadTimeWeeks: Number(row.lead_time_weeks ?? row.leadTimeWeeks) || 3,
+    customizationEnabled: row.customization_enabled ?? row.customizationEnabled ?? true,
+    customizationOptions,
+    customizationToleranceCm: Number(row.customization_tolerance_cm ?? row.customizationToleranceCm) || 15,
+    allowComUpholstery: row.allow_com_upholstery ?? row.allowComUpholstery ?? true,
+    metaTitle: row.meta_title ?? row.metaTitle ?? `${row.name} | CouchKraft`,
+    metaDescription: row.meta_description ?? row.metaDescription ?? "",
+    status: row.status || "published",
+    unitsSold: Number(row.units_sold ?? row.unitsSold) || 0,
+    revenue: Number(row.revenue) || 0,
+    createdAt: row.created_at || (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: row.updated_at || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+async function readProducts() {
+  const { data, error } = await supabase.from("products").select("*").order("created_at", { ascending: false });
+  if (error) {
+    console.error("[ProductStore] Supabase read error:", error.message);
+    throw new Error(`Failed to read products from Supabase: ${error.message}`);
+  }
+  return (data || []).map(fromProductDbRow);
+}
+async function findProductById(id) {
+  const { data, error } = await supabase.from("products").select("*").or(`id.eq.${id},slug.eq.${id}`).maybeSingle();
+  if (error) {
+    console.error("[ProductStore] Supabase findProductById error:", error.message);
+    return null;
+  }
+  return data ? fromProductDbRow(data) : null;
+}
+async function createProduct(input) {
+  if (!input.name || !input.name.trim()) {
+    throw new Error("Product name is required.");
+  }
+  const row = toProductDbRow(input);
+  const { data, error } = await supabase.from("products").insert([row]).select();
+  if (error) {
+    console.error("[ProductStore] Supabase createProduct error:", error.message);
+    throw new Error(`Database error creating product: ${error.message}`);
+  }
+  if (!data || !data.length) {
+    throw new Error("Failed to create product in database.");
+  }
+  return fromProductDbRow(data[0]);
+}
+async function updateProduct(id, updates) {
+  const row = toProductDbRow({ ...updates, id });
+  const { id: _, ...updatePayload } = row;
+  const { data, error } = await supabase.from("products").update({ ...updatePayload, updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", id).select();
+  if (error) {
+    console.error("[ProductStore] Supabase updateProduct error:", error.message);
+    throw new Error(`Database error updating product: ${error.message}`);
+  }
+  if (!data || !data.length) {
+    return null;
+  }
+  return fromProductDbRow(data[0]);
+}
+async function deleteProduct(id) {
+  const { error } = await supabase.from("products").delete().eq("id", id);
+  if (error) {
+    console.error("[ProductStore] Supabase deleteProduct error:", error.message);
+    throw new Error(`Database error deleting product: ${error.message}`);
+  }
+  return true;
+}
+async function readCategories() {
+  const [catsRes, prodsRes] = await Promise.all([
+    supabase.from("categories").select("*").order("name"),
+    supabase.from("products").select("category, category_id")
+  ]);
+  if (catsRes.error) {
+    console.error("[ProductStore] Supabase readCategories error:", catsRes.error.message);
+    throw new Error(`Database error reading categories: ${catsRes.error.message}`);
+  }
+  const products2 = prodsRes.data || [];
+  return (catsRes.data || []).map((cat) => ({
+    id: cat.id,
+    name: cat.name,
+    slug: cat.slug,
+    subClassifications: cat.sub_classifications || [],
+    description: cat.description || "",
+    image: cat.image || "",
+    productCount: products2.filter(
+      (p) => p.category_id === cat.id || p.category === cat.name || p.category?.includes(cat.name.split(">")[0].trim())
+    ).length
+  }));
+}
+async function createCategory(input) {
+  const slug = (input.slug || input.name || "category").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-");
+  const newCat = {
+    id: input.id || `cat_${Date.now()}`,
+    name: input.name || "New Category",
+    slug,
+    sub_classifications: input.subClassifications || [],
+    description: input.description || "",
+    image: input.image || "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=600&q=80",
+    product_count: 0
+  };
+  const { data, error } = await supabase.from("categories").insert([newCat]).select();
+  if (error) {
+    console.error("[ProductStore] Supabase createCategory error:", error.message);
+    throw new Error(`Database error creating category: ${error.message}`);
+  }
+  return {
+    id: data[0].id,
+    name: data[0].name,
+    slug: data[0].slug,
+    subClassifications: data[0].sub_classifications || [],
+    description: data[0].description || "",
+    image: data[0].image || "",
+    productCount: 0
+  };
+}
+async function updateCategory(id, updates) {
+  const patch = {};
+  if (updates.name !== void 0) patch.name = updates.name;
+  if (updates.slug !== void 0) patch.slug = updates.slug;
+  if (updates.subClassifications !== void 0) patch.sub_classifications = updates.subClassifications;
+  if (updates.description !== void 0) patch.description = updates.description;
+  if (updates.image !== void 0) patch.image = updates.image;
+  const { data, error } = await supabase.from("categories").update(patch).eq("id", id).select();
+  if (error) {
+    console.error("[ProductStore] Supabase updateCategory error:", error.message);
+    throw new Error(`Database error updating category: ${error.message}`);
+  }
+  if (!data || !data.length) return null;
+  return {
+    id: data[0].id,
+    name: data[0].name,
+    slug: data[0].slug,
+    subClassifications: data[0].sub_classifications || [],
+    description: data[0].description || "",
+    image: data[0].image || "",
+    productCount: 0
+  };
+}
+async function deleteCategory(id) {
+  const { error } = await supabase.from("categories").delete().eq("id", id);
+  if (error) {
+    console.error("[ProductStore] Supabase deleteCategory error:", error.message);
+    throw new Error(`Database error deleting category: ${error.message}`);
+  }
+  return true;
+}
+
+// server/marketing-store.ts
 import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "node:fs";
 import { resolve as resolve5 } from "node:path";
+var dataDir4 = dataDirectory();
+var couponsPath = resolve5(dataDir4, "coupons.json");
+var bannersPath = resolve5(dataDir4, "banners.json");
+var initialCoupons = [
+  {
+    id: "coup_warm10",
+    code: "WARM10",
+    type: "percent",
+    value: 10,
+    minOrderValue: 2e4,
+    maxDiscount: 15e3,
+    startDate: (/* @__PURE__ */ new Date()).toISOString(),
+    endDate: new Date(Date.now() + 90 * 24 * 3600 * 1e3).toISOString(),
+    usageLimit: 500,
+    usedCount: 38,
+    active: true,
+    description: "10% off on all living and lounge handcrafted silhouettes.",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  },
+  {
+    id: "coup_festive15",
+    code: "FESTIVE15",
+    type: "percent",
+    value: 15,
+    minOrderValue: 5e4,
+    maxDiscount: 25e3,
+    startDate: (/* @__PURE__ */ new Date()).toISOString(),
+    endDate: new Date(Date.now() + 30 * 24 * 3600 * 1e3).toISOString(),
+    usageLimit: 200,
+    usedCount: 14,
+    active: true,
+    description: "Special Diwali & Festive season tier discount.",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  },
+  {
+    id: "coup_welcome5k",
+    code: "WELCOME5000",
+    type: "flat",
+    value: 5e3,
+    minOrderValue: 75e3,
+    startDate: (/* @__PURE__ */ new Date()).toISOString(),
+    endDate: new Date(Date.now() + 180 * 24 * 3600 * 1e3).toISOString(),
+    usageLimit: 1e3,
+    usedCount: 82,
+    active: true,
+    description: "\u20B95,000 off on first bespoke order above \u20B975,000.",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  }
+];
+var initialBanners = [
+  {
+    id: "banner_living",
+    title: "In soft sculpture",
+    subtitle: "A quiet oak frame and generous boucl\xE9 contours that belong in a sunlit living room.",
+    desktopImage: "/hero-living-hd.jpg",
+    mobileImage: "/hero-living-scene.jpg",
+    ctaLabel: "Shop the Collection",
+    ctaUrl: "/shop?space=living",
+    badge: "NEW COLLECTION 2026",
+    alignment: "right",
+    tone: "dark",
+    space: "living",
+    active: true,
+    displayOrder: 1,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  },
+  {
+    id: "banner_dining",
+    title: "Gather beautifully",
+    subtitle: "Solid teakwood dining centerpieces engineered for generational memory.",
+    desktopImage: "/hero-dining-hd.jpg",
+    mobileImage: "/hero-dining.jpg",
+    ctaLabel: "Explore Dining",
+    ctaUrl: "/shop?space=dining",
+    badge: "EDITORIAL FEATURE",
+    alignment: "left",
+    tone: "dark",
+    space: "dining",
+    active: true,
+    displayOrder: 2,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  },
+  {
+    id: "banner_lounge",
+    title: "A quieter kind of comfort",
+    subtitle: "Deep sloped seats contoured around sustainably sourced Sheesham wood.",
+    desktopImage: "/hero-lounge-hd.jpg",
+    mobileImage: "/hero-lounge.jpg",
+    ctaLabel: "Discover Lounge",
+    ctaUrl: "/shop?space=lounge",
+    badge: "BESTSELLER",
+    alignment: "right",
+    tone: "dark",
+    space: "lounge",
+    active: true,
+    displayOrder: 3,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  }
+];
+function ensureStore2() {
+  if (!existsSync4(dataDir4)) mkdirSync4(dataDir4, { recursive: true });
+  if (!existsSync4(couponsPath)) {
+    writeFileSync4(couponsPath, JSON.stringify(initialCoupons, null, 2), "utf8");
+  }
+  if (!existsSync4(bannersPath)) {
+    writeFileSync4(bannersPath, JSON.stringify(initialBanners, null, 2), "utf8");
+  }
+}
+function readCoupons() {
+  ensureStore2();
+  try {
+    return JSON.parse(readFileSync4(couponsPath, "utf8"));
+  } catch {
+    return [];
+  }
+}
+function writeCoupons(coupons) {
+  ensureStore2();
+  writeFileSync4(couponsPath, JSON.stringify(coupons, null, 2), "utf8");
+}
+function createCoupon(input) {
+  const coupons = readCoupons();
+  const code = (input.code || "COUPON").toUpperCase().trim().replace(/\s+/g, "");
+  const newCoupon = {
+    id: input.id || `coup_${Date.now()}`,
+    code,
+    type: input.type || "percent",
+    value: Number(input.value) || 10,
+    minOrderValue: Number(input.minOrderValue) || 0,
+    maxDiscount: input.maxDiscount ? Number(input.maxDiscount) : void 0,
+    startDate: input.startDate || (/* @__PURE__ */ new Date()).toISOString(),
+    endDate: input.endDate || new Date(Date.now() + 60 * 24 * 3600 * 1e3).toISOString(),
+    usageLimit: input.usageLimit ? Number(input.usageLimit) : void 0,
+    usedCount: 0,
+    active: input.active ?? true,
+    description: input.description || "",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  coupons.unshift(newCoupon);
+  writeCoupons(coupons);
+  return newCoupon;
+}
+function updateCoupon(id, updates) {
+  const coupons = readCoupons();
+  const idx = coupons.findIndex((c) => c.id === id || c.code.toUpperCase() === id.toUpperCase());
+  if (idx === -1) return null;
+  coupons[idx] = {
+    ...coupons[idx],
+    ...updates,
+    id: coupons[idx].id,
+    code: (updates.code || coupons[idx].code).toUpperCase().trim(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  writeCoupons(coupons);
+  return coupons[idx];
+}
+function deleteCoupon(id) {
+  const coupons = readCoupons();
+  const filtered = coupons.filter((c) => c.id !== id && c.code.toUpperCase() !== id.toUpperCase());
+  if (filtered.length === coupons.length) return false;
+  writeCoupons(filtered);
+  return true;
+}
+function readBanners() {
+  ensureStore2();
+  try {
+    const banners = JSON.parse(readFileSync4(bannersPath, "utf8"));
+    return banners.sort((a, b) => a.displayOrder - b.displayOrder);
+  } catch {
+    return [];
+  }
+}
+function writeBanners(banners) {
+  ensureStore2();
+  writeFileSync4(bannersPath, JSON.stringify(banners, null, 2), "utf8");
+}
+function createBanner(input) {
+  const banners = readBanners();
+  const newBanner = {
+    id: input.id || `banner_${Date.now()}`,
+    title: input.title || "New Banner Headline",
+    subtitle: input.subtitle || "",
+    desktopImage: input.desktopImage || "/hero-living-hd.jpg",
+    mobileImage: input.mobileImage || "/hero-living-scene.jpg",
+    ctaLabel: input.ctaLabel || "Explore Collection",
+    ctaUrl: input.ctaUrl || "/shop",
+    badge: input.badge || "PROMOTIONAL",
+    alignment: input.alignment || "right",
+    tone: input.tone || "dark",
+    space: input.space || "living",
+    active: input.active ?? true,
+    displayOrder: input.displayOrder || banners.length + 1,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  banners.push(newBanner);
+  writeBanners(banners);
+  return newBanner;
+}
+function updateBanner(id, updates) {
+  const banners = readBanners();
+  const idx = banners.findIndex((b) => b.id === id);
+  if (idx === -1) return null;
+  banners[idx] = {
+    ...banners[idx],
+    ...updates,
+    id: banners[idx].id,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  writeBanners(banners);
+  return banners[idx];
+}
+function deleteBanner(id) {
+  const banners = readBanners();
+  const filtered = banners.filter((b) => b.id !== id);
+  if (filtered.length === banners.length) return false;
+  writeBanners(filtered);
+  return true;
+}
+
+// server/admin-api-handler.ts
+var ADMIN_COOKIE = "ck_admin_session";
+function send(res, status, data) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(data));
+  return true;
+}
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key) out[key] = decodeURIComponent(rest.join("="));
+  }
+  return out;
+}
+function cookieFlags() {
+  return process.env.VERCEL ? "HttpOnly; Path=/; SameSite=Lax; Secure" : "HttpOnly; Path=/; SameSite=Lax";
+}
+function setAdminSession(res, token) {
+  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=${token}; ${cookieFlags()}; Max-Age=${60 * 60 * 24 * 7}`);
+}
+function clearAdminSession(res) {
+  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=; ${cookieFlags()}; Max-Age=0`);
+}
+function currentAdmin(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token2 = authHeader.slice(7).trim();
+    const admin = verifyAdminToken(token2);
+    if (admin) return admin;
+  }
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[ADMIN_COOKIE];
+  if (token) {
+    return verifyAdminToken(token);
+  }
+  return null;
+}
+function readAllOrders() {
+  try {
+    const p = resolve6(dataDirectory(), "orders.json");
+    if (existsSync5(p)) {
+      return JSON.parse(readFileSync5(p, "utf8"));
+    }
+  } catch {
+  }
+  return [];
+}
+function writeAllOrders(orders) {
+  const p = resolve6(dataDirectory(), "orders.json");
+  writeFileSync5(p, JSON.stringify(orders, null, 2), "utf8");
+}
+function readAllCustomers() {
+  try {
+    const p = resolve6(dataDirectory(), "customers.json");
+    if (existsSync5(p)) {
+      return JSON.parse(readFileSync5(p, "utf8"));
+    }
+  } catch {
+  }
+  return [];
+}
+async function handleAdminApi(req, res, url, body) {
+  if (req.method === "POST" && url === "/api/admin/auth/login") {
+    const email = String(body.email || "").trim();
+    const password = String(body.password || "");
+    if (!email || !password) {
+      return send(res, 400, { error: "Please enter administrator email and password." });
+    }
+    const admin2 = findAdminByEmail(email);
+    if (!admin2) {
+      return send(res, 401, { error: "Invalid administrator credentials." });
+    }
+    const matches = await bcrypt2.compare(password, admin2.passwordHash);
+    if (!matches) {
+      return send(res, 401, { error: "Invalid administrator credentials." });
+    }
+    const token = signAdminToken(admin2);
+    setAdminSession(res, token);
+    logAdminAction({
+      adminId: admin2.id,
+      adminName: admin2.name,
+      action: "login",
+      targetType: "admin_session",
+      targetId: admin2.id
+    });
+    return send(res, 200, {
+      admin: publicAdmin(admin2),
+      token,
+      message: "Welcome back, " + admin2.name
+    });
+  }
+  if (req.method === "POST" && url === "/api/admin/auth/logout") {
+    clearAdminSession(res);
+    return send(res, 200, { ok: true, message: "Signed out successfully." });
+  }
+  const admin = currentAdmin(req);
+  if (!admin) {
+    return send(res, 401, { error: "Unauthorized. Admin session required." });
+  }
+  if (req.method === "GET" && url === "/api/admin/auth/me") {
+    return send(res, 200, { admin: publicAdmin(admin) });
+  }
+  if (req.method === "GET" && url === "/api/admin/dashboard/stats") {
+    const orders = readAllOrders();
+    const customers = readAllCustomers();
+    const products2 = await readProducts();
+    const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const todayOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(todayStr));
+    const todaySales = todayOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+    const thisMonthStr = todayStr.slice(0, 7);
+    const monthOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(thisMonthStr));
+    const monthSales = monthOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+    const totalRevenue = orders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+    const pendingOrders = orders.filter((o) => o.fulfilmentStatus !== "delivered").length;
+    const deliveredOrders = orders.filter((o) => o.fulfilmentStatus === "delivered").length;
+    const lowStockProducts = products2.filter((p) => p.readyToShipStock <= p.lowStockThreshold);
+    return send(res, 200, {
+      todaySales,
+      todayOrdersCount: todayOrders.length,
+      monthlySales: monthSales,
+      totalRevenue,
+      totalOrders: orders.length,
+      pendingOrders,
+      deliveredOrders,
+      customerCount: customers.length,
+      totalProducts: products2.length,
+      lowStockCount: lowStockProducts.length,
+      lowStockProducts: lowStockProducts.slice(0, 5),
+      pendingEnquiriesCount: 3,
+      // Customization inquiries telemetry
+      recentOrders: orders.slice(0, 6),
+      recentAudit: getAuditLogs(5)
+    });
+  }
+  if (req.method === "GET" && url === "/api/admin/products") {
+    try {
+      const products2 = await readProducts();
+      return send(res, 200, { products: products2 });
+    } catch (err) {
+      return send(res, 500, { error: err.message || "Failed to fetch products from Supabase." });
+    }
+  }
+  if (req.method === "POST" && url === "/api/admin/products") {
+    try {
+      const created = await createProduct(body);
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: "create_product",
+        targetType: "product",
+        targetId: created.id,
+        details: { name: created.name, sku: created.sku, price: created.price }
+      });
+      return send(res, 201, { product: created, message: "Product created and published to Supabase successfully." });
+    } catch (err) {
+      return send(res, 400, { error: err.message || "Failed to create product in Supabase." });
+    }
+  }
+  const productMatch = url.match(/^\/api\/admin\/products\/([^/]+)$/);
+  if (productMatch) {
+    const prodId = productMatch[1];
+    if (req.method === "GET") {
+      const prod = await findProductById(prodId);
+      if (!prod) return send(res, 404, { error: "Product not found." });
+      return send(res, 200, { product: prod });
+    }
+    if (req.method === "PUT") {
+      try {
+        const updated = await updateProduct(prodId, body);
+        if (!updated) return send(res, 404, { error: "Product not found." });
+        logAdminAction({
+          adminId: admin.id,
+          adminName: admin.name,
+          action: "update_product",
+          targetType: "product",
+          targetId: updated.id,
+          details: { name: updated.name, price: updated.price, status: updated.status }
+        });
+        return send(res, 200, { product: updated, message: "Product updated in Supabase successfully." });
+      } catch (err) {
+        return send(res, 400, { error: err.message || "Failed to update product in Supabase." });
+      }
+    }
+    if (req.method === "DELETE") {
+      try {
+        const deleted = await deleteProduct(prodId);
+        if (!deleted) return send(res, 404, { error: "Product not found." });
+        logAdminAction({
+          adminId: admin.id,
+          adminName: admin.name,
+          action: "delete_product",
+          targetType: "product",
+          targetId: prodId
+        });
+        return send(res, 200, { ok: true, message: "Product removed from catalog." });
+      } catch (err) {
+        return send(res, 400, { error: err.message || "Failed to delete product from Supabase." });
+      }
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/categories") {
+    try {
+      const categories = await readCategories();
+      return send(res, 200, { categories });
+    } catch (err) {
+      return send(res, 500, { error: err.message || "Failed to fetch categories." });
+    }
+  }
+  if (req.method === "POST" && url === "/api/admin/categories") {
+    try {
+      const created = await createCategory(body);
+      return send(res, 201, { category: created });
+    } catch (err) {
+      return send(res, 400, { error: err.message || "Failed to create category." });
+    }
+  }
+  const catMatch = url.match(/^\/api\/admin\/categories\/([^/]+)$/);
+  if (catMatch) {
+    const catId = catMatch[1];
+    if (req.method === "PUT") {
+      try {
+        const updated = await updateCategory(catId, body);
+        if (!updated) return send(res, 404, { error: "Category not found." });
+        return send(res, 200, { category: updated });
+      } catch (err) {
+        return send(res, 400, { error: err.message || "Failed to update category." });
+      }
+    }
+    if (req.method === "DELETE") {
+      try {
+        const ok = await deleteCategory(catId);
+        if (!ok) return send(res, 404, { error: "Category not found." });
+        return send(res, 200, { ok: true });
+      } catch (err) {
+        return send(res, 400, { error: err.message || "Failed to delete category." });
+      }
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/inventory") {
+    const products2 = await readProducts();
+    const inventory = products2.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      category: p.category,
+      readyToShipStock: p.readyToShipStock,
+      lowStockThreshold: p.lowStockThreshold,
+      madeToOrder: p.madeToOrder,
+      leadTimeWeeks: p.leadTimeWeeks,
+      status: p.readyToShipStock <= 0 ? "Out of Stock" : p.readyToShipStock <= p.lowStockThreshold ? "Low Stock" : "In Stock",
+      image: p.images[0] || "",
+      price: p.price
+    }));
+    return send(res, 200, { inventory });
+  }
+  if (req.method === "GET" && url === "/api/admin/coupons") {
+    return send(res, 200, { coupons: readCoupons() });
+  }
+  if (req.method === "POST" && url === "/api/admin/coupons") {
+    const created = createCoupon(body);
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "create_coupon",
+      targetType: "coupon",
+      targetId: created.id,
+      details: { code: created.code, value: created.value, type: created.type }
+    });
+    return send(res, 201, { coupon: created, message: "Coupon created." });
+  }
+  const couponMatch = url.match(/^\/api\/admin\/coupons\/([^/]+)$/);
+  if (couponMatch) {
+    const coupId = couponMatch[1];
+    if (req.method === "PUT") {
+      const updated = updateCoupon(coupId, body);
+      if (!updated) return send(res, 404, { error: "Coupon not found." });
+      return send(res, 200, { coupon: updated, message: "Coupon updated." });
+    }
+    if (req.method === "DELETE") {
+      const ok = deleteCoupon(coupId);
+      if (!ok) return send(res, 404, { error: "Coupon not found." });
+      return send(res, 200, { ok: true, message: "Coupon deleted." });
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/banners") {
+    return send(res, 200, { banners: readBanners() });
+  }
+  if (req.method === "POST" && url === "/api/admin/banners") {
+    const created = createBanner(body);
+    return send(res, 201, { banner: created, message: "Promotional banner added." });
+  }
+  const bannerMatch = url.match(/^\/api\/admin\/banners\/([^/]+)$/);
+  if (bannerMatch) {
+    const bannerId = bannerMatch[1];
+    if (req.method === "PUT") {
+      const updated = updateBanner(bannerId, body);
+      if (!updated) return send(res, 404, { error: "Banner not found." });
+      return send(res, 200, { banner: updated, message: "Banner updated." });
+    }
+    if (req.method === "DELETE") {
+      const ok = deleteBanner(bannerId);
+      if (!ok) return send(res, 404, { error: "Banner not found." });
+      return send(res, 200, { ok: true, message: "Banner removed." });
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/orders") {
+    const orders = readAllOrders();
+    return send(res, 200, { orders });
+  }
+  const orderStatusMatch = url.match(/^\/api\/admin\/orders\/([^/]+)\/status$/);
+  if (orderStatusMatch && req.method === "PUT") {
+    const orderId = orderStatusMatch[1];
+    const orders = readAllOrders();
+    const idx = orders.findIndex((o) => o.id === orderId || o.number === orderId);
+    if (idx === -1) return send(res, 404, { error: "Order not found." });
+    const fulfilmentStatus = String(body.fulfilmentStatus || orders[idx].fulfilmentStatus);
+    const paymentStatus = String(body.paymentStatus || orders[idx].paymentStatus);
+    const trackingNumber = body.trackingNumber !== void 0 ? String(body.trackingNumber) : orders[idx].trackingNumber;
+    orders[idx] = {
+      ...orders[idx],
+      fulfilmentStatus,
+      paymentStatus,
+      trackingNumber
+    };
+    writeAllOrders(orders);
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "update_order_status",
+      targetType: "order",
+      targetId: orders[idx].id,
+      details: { orderNumber: orders[idx].number, fulfilmentStatus, paymentStatus }
+    });
+    return send(res, 200, { order: orders[idx], message: "Order status updated." });
+  }
+  if (req.method === "GET" && url === "/api/admin/customers") {
+    const customers = readAllCustomers();
+    const orders = readAllOrders();
+    const safeCustomers = customers.map((c) => {
+      const customerOrders = orders.filter((o) => o.customerId === c.id);
+      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+      return {
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        emailVerified: c.emailVerified,
+        createdAt: c.createdAt,
+        addressesCount: c.addresses ? c.addresses.length : 0,
+        ordersCount: customerOrders.length,
+        totalSpent
+      };
+    });
+    return send(res, 200, { customers: safeCustomers });
+  }
+  if (req.method === "POST" && url === "/api/admin/upload") {
+    const dataUri = String(body.dataUri || "");
+    const fileName = String(body.fileName || `asset_${Date.now()}.png`).replace(/[^a-zA-Z0-9_.-]/g, "_");
+    if (!dataUri.startsWith("data:image/")) {
+      return send(res, 400, { error: "Invalid image format. Expected base64 data URI." });
+    }
+    const matches = dataUri.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+    if (!matches) {
+      return send(res, 400, { error: "Malformed image data URI." });
+    }
+    const buffer = Buffer.from(matches[2], "base64");
+    if (buffer.length > 10 * 1024 * 1024) {
+      return send(res, 400, { error: "Image exceeds 10MB limit." });
+    }
+    const publicUploads = resolve6(process.cwd(), "public", "uploads");
+    if (!existsSync5(publicUploads)) mkdirSync5(publicUploads, { recursive: true });
+    const finalName = `upload_${Date.now()}_${fileName}`;
+    writeFileSync5(resolve6(publicUploads, finalName), buffer);
+    return send(res, 200, {
+      url: `/uploads/${finalName}`,
+      size: buffer.length,
+      name: finalName
+    });
+  }
+  if (req.method === "GET" && url === "/api/admin/audit") {
+    return send(res, 200, { logs: getAuditLogs(100) });
+  }
+  if (req.method === "GET" && url === "/api/admin/settings") {
+    return send(res, 200, { settings: readSettings() });
+  }
+  if (req.method === "PUT" && url === "/api/admin/settings") {
+    const current = readSettings();
+    const updated = writeSettings({
+      whatsapp: {
+        ...current.whatsapp,
+        ...body.whatsapp || body
+      }
+    });
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "update_settings",
+      targetType: "settings",
+      targetId: "whatsapp",
+      details: { businessPhone: updated.whatsapp.businessPhone }
+    });
+    return send(res, 200, { ok: true, settings: updated, message: "Settings saved successfully." });
+  }
+  if (req.method === "GET" && url === "/api/admin/custom-requests") {
+    return send(res, 200, { requests: readCustomRequests() });
+  }
+  const reqMatch = url.match(/^\/api\/admin\/custom-requests\/([^/]+)$/);
+  if (reqMatch) {
+    const reqId = reqMatch[1];
+    if (req.method === "PUT") {
+      const updated = await updateCustomRequestStatus(reqId, {
+        status: body.status,
+        adminNotes: typeof body.adminNotes === "string" ? body.adminNotes : void 0
+      });
+      if (!updated) return send(res, 404, { error: "Custom request not found." });
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: "update_custom_request",
+        targetType: "custom_request",
+        targetId: reqId,
+        details: { status: updated.status }
+      });
+      return send(res, 200, { ok: true, request: updated, message: "Request status updated." });
+    }
+  }
+  return send(res, 404, { error: "Admin API route not found." });
+}
+
+// server/auth-middleware.ts
+import { createHmac as createHmac2 } from "node:crypto";
+import bcrypt4 from "bcryptjs";
+import jwt2 from "jsonwebtoken";
+
+// server/auth-store.ts
+import { createHash, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
+import bcrypt3 from "bcryptjs";
+function hashToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+function newToken() {
+  return randomBytes2(32).toString("hex");
+}
+function fromCustomerDbRow(row) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    email: (row.email || "").toLowerCase().trim(),
+    phone: row.phone || "",
+    passwordHash: row.password_hash || "",
+    emailVerified: Boolean(row.email_verified),
+    verifyTokenHash: row.verify_token || null,
+    verifyExpires: row.verify_expires ? Number(row.verify_expires) : null,
+    resetTokenHash: row.reset_token || null,
+    resetExpires: row.reset_expires ? Number(row.reset_expires) : null,
+    createdAt: row.created_at || (/* @__PURE__ */ new Date()).toISOString(),
+    addresses: Array.isArray(row.addresses) ? row.addresses : []
+  };
+}
+function toCustomerDbRow(c) {
+  return {
+    id: c.id,
+    name: c.name,
+    email: c.email.toLowerCase().trim(),
+    phone: c.phone || "",
+    password_hash: c.passwordHash,
+    email_verified: c.emailVerified,
+    verify_token: c.verifyTokenHash,
+    reset_token: c.resetTokenHash,
+    reset_expires: c.resetExpires,
+    addresses: c.addresses || [],
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+async function findByEmail(email) {
+  const cleanEmail = email.toLowerCase().trim();
+  if (!cleanEmail) return null;
+  const { data, error } = await supabase.from("customers").select("*").eq("email", cleanEmail).maybeSingle();
+  if (error) {
+    console.error("[AuthStore] Supabase findByEmail error:", error.message);
+    return null;
+  }
+  return data ? fromCustomerDbRow(data) : null;
+}
+async function findById(id) {
+  if (!id) return null;
+  const { data, error } = await supabase.from("customers").select("*").eq("id", id).maybeSingle();
+  if (error) {
+    console.error("[AuthStore] Supabase findById error:", error.message);
+    return null;
+  }
+  return data ? fromCustomerDbRow(data) : null;
+}
+function publicCustomer(customer) {
+  return {
+    id: customer.id,
+    name: customer.name,
+    email: customer.email,
+    phone: customer.phone,
+    emailVerified: customer.emailVerified
+  };
+}
+async function createCustomer(input) {
+  const email = input.email.toLowerCase().trim();
+  const existing = await findByEmail(email);
+  if (existing) {
+    return { error: "duplicate" };
+  }
+  const verifyToken = newToken();
+  const customer = {
+    id: randomBytes2(12).toString("hex"),
+    name: input.name.trim(),
+    email,
+    phone: input.phone.trim(),
+    passwordHash: await bcrypt3.hash(input.password, 12),
+    emailVerified: false,
+    verifyTokenHash: hashToken(verifyToken),
+    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24,
+    resetTokenHash: null,
+    resetExpires: null,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    addresses: []
+  };
+  const row = toCustomerDbRow(customer);
+  row.created_at = customer.createdAt;
+  const { data, error } = await supabase.from("customers").insert([row]).select();
+  if (error) {
+    console.error("[AuthStore] Supabase createCustomer error:", error.message);
+    throw new Error(`Failed to create account in database: ${error.message}`);
+  }
+  return { customer: fromCustomerDbRow(data[0]), verifyToken };
+}
+async function saveCustomer(updated) {
+  const row = toCustomerDbRow(updated);
+  const { error } = await supabase.from("customers").upsert([row], { onConflict: "id" });
+  if (error) {
+    console.error("[AuthStore] Supabase saveCustomer error:", error.message);
+    throw new Error(`Failed to save customer in database: ${error.message}`);
+  }
+}
+async function updateProfile(customer, input) {
+  const email = input.email.toLowerCase().trim();
+  if (email !== customer.email) {
+    const taken = await findByEmail(email);
+    if (taken && taken.id !== customer.id) return { error: "duplicate" };
+  }
+  const next = {
+    ...customer,
+    name: input.name.trim(),
+    email,
+    phone: input.phone.trim()
+  };
+  await saveCustomer(next);
+  return { customer: next };
+}
+async function issueResetToken(customer) {
+  const resetToken = newToken();
+  await saveCustomer({
+    ...customer,
+    resetTokenHash: hashToken(resetToken),
+    resetExpires: Date.now() + 1e3 * 60 * 30
+  });
+  return resetToken;
+}
+async function findByVerifyToken(token) {
+  const hashed = hashToken(token);
+  const { data, error } = await supabase.from("customers").select("*").eq("verify_token", hashed).maybeSingle();
+  if (error || !data) return null;
+  return fromCustomerDbRow(data);
+}
+async function findByResetToken(token) {
+  const hashed = hashToken(token);
+  const { data, error } = await supabase.from("customers").select("*").eq("reset_token", hashed).maybeSingle();
+  if (error || !data) return null;
+  return fromCustomerDbRow(data);
+}
+async function setPassword(customer, password) {
+  await saveCustomer({
+    ...customer,
+    passwordHash: await bcrypt3.hash(password, 12),
+    resetTokenHash: null,
+    resetExpires: null
+  });
+}
+async function addAddress(customer, input) {
+  const address = { ...input, id: randomBytes2(8).toString("hex") };
+  await saveCustomer({ ...customer, addresses: [...customer.addresses, address] });
+  return address;
+}
+async function updateAddress(customer, addressId, input) {
+  const addresses = customer.addresses.map((address) => address.id === addressId ? { ...input, id: addressId } : address);
+  if (!addresses.some((address) => address.id === addressId)) return null;
+  await saveCustomer({ ...customer, addresses });
+  return addresses.find((address) => address.id === addressId) ?? null;
+}
+async function removeAddress(customer, addressId) {
+  if (!customer.addresses.some((address) => address.id === addressId)) return false;
+  await saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) });
+  return true;
+}
+async function sendEmailOtp(email) {
+  try {
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.toLowerCase().trim(),
+      options: { shouldCreateUser: true }
+    });
+    if (error) {
+      console.warn("[Supabase Auth OTP Send Warning]:", error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("[Supabase Auth OTP Send Exception]:", err);
+    return { ok: false, error: err.message || "Failed to dispatch email verification." };
+  }
+}
+async function verifyEmailOtp(email, token) {
+  const cleanEmail = email.toLowerCase().trim();
+  const cleanToken = token.trim();
+  try {
+    let { data, error } = await supabase.auth.verifyOtp({
+      email: cleanEmail,
+      token: cleanToken,
+      type: "email"
+    });
+    if (error || !data?.user) {
+      const fallback = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: "signup"
+      });
+      if (!fallback.error && fallback.data?.user) {
+        data = fallback.data;
+        error = null;
+      }
+    }
+    if (error || !data?.user) {
+      return { ok: false, error: error?.message || "Invalid or expired verification code." };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message || "Verification failed." };
+  }
+}
+async function sendPasswordResetEmail(email, redirectTo) {
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+      redirectTo
+    });
+    if (error) {
+      console.warn("[Supabase Auth Reset Password Warning]:", error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("[Supabase Auth Reset Password Exception]:", err);
+    return { ok: false, error: err.message || "Failed to dispatch password reset email." };
+  }
+}
+
+// server/order-store.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync6 } from "node:fs";
+import { resolve as resolve7 } from "node:path";
 
 // src/data/products.ts
 var img = (id, w = 1200) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=80`;
@@ -562,1045 +1700,6 @@ var products = [
   }
 ];
 
-// server/product-store.ts
-var dataDir4 = dataDirectory();
-var productsPath = resolve5(dataDir4, "products.json");
-var categoriesPath = resolve5(dataDir4, "categories.json");
-var initialCategories = [
-  {
-    id: "cat_sofas",
-    name: "Living Room > Sofas & Couches",
-    slug: "sofas-and-couches",
-    subClassifications: ["3-Seater Sofas", "Sectionals & L-Shapes", "Chesterfield Sofas", "Modular Loungers"],
-    description: "Artisanal sofas crafted from kiln-dried hardwood and organic Belgian fabrics.",
-    image: "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=600&q=80",
-    productCount: 1
-  },
-  {
-    id: "cat_chairs",
-    name: "Bedroom > Lounge Chairs",
-    slug: "lounge-chairs",
-    subClassifications: ["Accent Chairs", "Recliners", "Rocking Chairs"],
-    description: "Sculptural seating designed for quiet reading and relaxed conversation.",
-    image: "https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=600&q=80",
-    productCount: 1
-  },
-  {
-    id: "cat_storage",
-    name: "Dining > Benches & Storage",
-    slug: "benches-and-storage",
-    subClassifications: ["Sideboards", "Credenzas", "Dining Benches"],
-    description: "Minimalist wooden storage units with architectural proportions.",
-    image: "https://images.unsplash.com/photo-1611967164521-abae8fba4668?auto=format&fit=crop&w=600&q=80",
-    productCount: 1
-  },
-  {
-    id: "cat_accent",
-    name: "Study > Accent Seating",
-    slug: "accent-seating",
-    subClassifications: ["Daybeds", "Ottomans", "Chaise Lounges"],
-    description: "Versatile handcrafted accent daybeds and sloped seating.",
-    image: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=600&q=80",
-    productCount: 1
-  }
-];
-function ensureStore2() {
-  if (!existsSync4(dataDir4)) mkdirSync4(dataDir4, { recursive: true });
-  if (!existsSync4(categoriesPath)) {
-    writeFileSync4(categoriesPath, JSON.stringify(initialCategories, null, 2), "utf8");
-  }
-  if (!existsSync4(productsPath)) {
-    const seeded = products.map((p, idx) => {
-      const isArden = p.id === "ck-arden-sofa";
-      return {
-        ...p,
-        sku: isArden ? "CK-SOF-001" : `CK-PRD-${String(idx + 1).padStart(3, "0")}`,
-        price: isArden ? 78e3 : p.price,
-        compareAt: isArden ? 95e3 : Math.round(p.price * 1.2),
-        gstSlab: "18% GST (Standard Furniture)",
-        hsnCode: "9403 6000",
-        subCategory: isArden ? "3-Seater Sofas" : "Standard",
-        shortExcerpt: isArden ? "Clean mid-century lines wrapped in natural woven textures. Ergonomic sloped cushions sculpted over sustainably sourced teakwood." : p.description.slice(0, 140),
-        description: isArden ? "The Arden Sofa embodies our philosophy of quiet luxury. Engineered for longevity, the structure integrates hand-carved kiln-dried teakwood arms with a supportive serpentine spring assembly. The cushions are enveloped in Belgian-milled linen blend fabric, resistant to piling and softly textured to the touch.\n\nEvery silhouette line is smoothed to architectural perfection, delivering a calm presence in both light-drenched contemporary apartments and storied traditional residences." : p.description,
-        videoUrl: isArden ? "https://youtube.com/watch?v=couchkraft-arden-craft" : "",
-        colorSwatches: isArden ? [
-          { name: "Terracotta Rust", hex: "#B35438", skuCode: "SKU-TRC", active: true },
-          { name: "Warm Ivory", hex: "#E8DFC9", skuCode: "SKU-WIV", active: true },
-          { name: "Olive Green", hex: "#5D6B57", skuCode: "SKU-OLV", active: true },
-          { name: "Muted Taupe", hex: "#9C8F84", skuCode: "SKU-MTP", active: true }
-        ] : [
-          { name: "Natural Oak", hex: "#D2B48C", skuCode: "SKU-NAT", active: true },
-          { name: "Warm Oat", hex: "#E5D3B3", skuCode: "SKU-OAT", active: true }
-        ],
-        dimensions: isArden ? { width: 215, depth: 92, height: 84, seatHeight: 44 } : { width: 180, depth: 85, height: 80, seatHeight: 42 },
-        netWeight: isArden ? "58 kg" : "45 kg",
-        seatingCapacity: isArden ? "3 Persons (Max 360 kg)" : "2 Persons",
-        warranty: "5 Years Structural Frame",
-        structuralWood: "Kiln-dried Teak & Sheesham Hardwood",
-        foamUpholstery: "38-Density Ultra-Cell Foam + Belgian Linen Blend",
-        readyToShipStock: isArden ? 8 : 4,
-        lowStockThreshold: 2,
-        madeToOrder: true,
-        leadTimeWeeks: 3,
-        customizationEnabled: true,
-        customizationToleranceCm: 15,
-        allowComUpholstery: true,
-        metaTitle: isArden ? "Arden Three-Seater Sofa | CouchKraft Bespoke Teak Living" : `${p.name} | CouchKraft Artisanal Furniture`,
-        metaDescription: isArden ? "Buy the handcrafted Arden Three-Seater Sofa at CouchKraft. Solid kiln-dried teakwood frame wrapped in organic linen upholstery. Handcrafted in India with white-glove delivery." : p.description,
-        status: "published",
-        unitsSold: isArden ? 24 : 12,
-        revenue: isArden ? 1872e3 : 504e3,
-        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-    });
-    writeFileSync4(productsPath, JSON.stringify(seeded, null, 2), "utf8");
-  }
-}
-function readProducts() {
-  ensureStore2();
-  try {
-    return JSON.parse(readFileSync4(productsPath, "utf8"));
-  } catch {
-    return [];
-  }
-}
-function writeProducts(products2) {
-  ensureStore2();
-  writeFileSync4(productsPath, JSON.stringify(products2, null, 2), "utf8");
-}
-function findProductById(id) {
-  const products2 = readProducts();
-  return products2.find((p) => p.id === id || p.slug === id) ?? null;
-}
-function createProduct(input) {
-  const products2 = readProducts();
-  const slug = (input.slug || input.name || "product").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const id = input.id || `ck-${slug}-${Date.now().toString(36)}`;
-  const newProduct = {
-    id,
-    slug,
-    name: input.name || "Untitled Product",
-    sku: input.sku || `CK-GEN-${Date.now().toString(36).toUpperCase()}`,
-    price: Number(input.price) || 0,
-    compareAt: Number(input.compareAt) || Math.round((Number(input.price) || 0) * 1.2),
-    gstSlab: input.gstSlab || "18% GST (Standard Furniture)",
-    hsnCode: input.hsnCode || "9403 6000",
-    description: input.description || "",
-    shortExcerpt: input.shortExcerpt || "",
-    category: input.category || "Living Room > Sofas & Couches",
-    subCategory: input.subCategory || "General",
-    space: input.space || "living",
-    tabs: input.tabs || ["bestsellers", "new"],
-    images: input.images && input.images.length ? input.images : [
-      "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=1200&q=80"
-    ],
-    videoUrl: input.videoUrl || "",
-    finishes: input.finishes || ["Standard"],
-    colorSwatches: input.colorSwatches || [
-      { name: "Terracotta Rust", hex: "#B35438", skuCode: "SKU-TRC", active: true },
-      { name: "Warm Ivory", hex: "#E8DFC9", skuCode: "SKU-WIV", active: true }
-    ],
-    care: input.care || "Vacuum gently with soft brush. Spot clean with dry solvent cleaner.",
-    dimensions: input.dimensions || { width: 200, depth: 90, height: 80, seatHeight: 42 },
-    netWeight: input.netWeight || "50 kg",
-    seatingCapacity: input.seatingCapacity || "3 Persons",
-    warranty: input.warranty || "5 Years Structural Frame",
-    structuralWood: input.structuralWood || "Kiln-dried Teak & Sheesham Hardwood",
-    foamUpholstery: input.foamUpholstery || "38-Density Ultra-Cell Foam + Belgian Linen Blend",
-    readyToShipStock: Number(input.readyToShipStock) || 0,
-    lowStockThreshold: Number(input.lowStockThreshold) || 2,
-    madeToOrder: input.madeToOrder ?? true,
-    leadTimeWeeks: Number(input.leadTimeWeeks) || 3,
-    customizationEnabled: input.customizationEnabled ?? true,
-    customizationOptions: input.customizationOptions || void 0,
-    customizationToleranceCm: Number(input.customizationToleranceCm) || 15,
-    allowComUpholstery: input.allowComUpholstery ?? true,
-    metaTitle: input.metaTitle || `${input.name || "Piece"} | CouchKraft`,
-    metaDescription: input.metaDescription || (input.shortExcerpt || input.description || "").slice(0, 160),
-    status: input.status || "published",
-    unitsSold: Number(input.unitsSold) || 0,
-    revenue: Number(input.revenue) || 0,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  products2.unshift(newProduct);
-  writeProducts(products2);
-  return newProduct;
-}
-function updateProduct(id, updates) {
-  const products2 = readProducts();
-  const idx = products2.findIndex((p) => p.id === id || p.slug === id);
-  if (idx === -1) return null;
-  const existing = products2[idx];
-  const updated = {
-    ...existing,
-    ...updates,
-    id: existing.id,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  products2[idx] = updated;
-  writeProducts(products2);
-  return updated;
-}
-function deleteProduct(id) {
-  const products2 = readProducts();
-  const filtered = products2.filter((p) => p.id !== id && p.slug !== id);
-  if (filtered.length === products2.length) return false;
-  writeProducts(filtered);
-  return true;
-}
-function readCategories() {
-  ensureStore2();
-  try {
-    const categories = JSON.parse(readFileSync4(categoriesPath, "utf8"));
-    const products2 = readProducts();
-    return categories.map((cat) => ({
-      ...cat,
-      productCount: products2.filter((p) => p.category === cat.name || p.category.includes(cat.name.split(">")[0].trim())).length
-    }));
-  } catch {
-    return [];
-  }
-}
-function writeCategories(categories) {
-  ensureStore2();
-  writeFileSync4(categoriesPath, JSON.stringify(categories, null, 2), "utf8");
-}
-function createCategory(input) {
-  const categories = readCategories();
-  const slug = (input.slug || input.name || "category").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-");
-  const newCat = {
-    id: input.id || `cat_${Date.now()}`,
-    name: input.name || "New Category",
-    slug,
-    subClassifications: input.subClassifications || [],
-    description: input.description || "",
-    image: input.image || "https://images.unsplash.com/photo-1567016432779-094069958ea5?auto=format&fit=crop&w=600&q=80",
-    productCount: 0
-  };
-  categories.push(newCat);
-  writeCategories(categories);
-  return newCat;
-}
-function updateCategory(id, updates) {
-  const categories = readCategories();
-  const idx = categories.findIndex((c) => c.id === id || c.slug === id);
-  if (idx === -1) return null;
-  categories[idx] = { ...categories[idx], ...updates, id: categories[idx].id };
-  writeCategories(categories);
-  return categories[idx];
-}
-function deleteCategory(id) {
-  const categories = readCategories();
-  const filtered = categories.filter((c) => c.id !== id && c.slug !== id);
-  if (filtered.length === categories.length) return false;
-  writeCategories(filtered);
-  return true;
-}
-
-// server/marketing-store.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync5 } from "node:fs";
-import { resolve as resolve6 } from "node:path";
-var dataDir5 = dataDirectory();
-var couponsPath = resolve6(dataDir5, "coupons.json");
-var bannersPath = resolve6(dataDir5, "banners.json");
-var initialCoupons = [
-  {
-    id: "coup_warm10",
-    code: "WARM10",
-    type: "percent",
-    value: 10,
-    minOrderValue: 2e4,
-    maxDiscount: 15e3,
-    startDate: (/* @__PURE__ */ new Date()).toISOString(),
-    endDate: new Date(Date.now() + 90 * 24 * 3600 * 1e3).toISOString(),
-    usageLimit: 500,
-    usedCount: 38,
-    active: true,
-    description: "10% off on all living and lounge handcrafted silhouettes.",
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  },
-  {
-    id: "coup_festive15",
-    code: "FESTIVE15",
-    type: "percent",
-    value: 15,
-    minOrderValue: 5e4,
-    maxDiscount: 25e3,
-    startDate: (/* @__PURE__ */ new Date()).toISOString(),
-    endDate: new Date(Date.now() + 30 * 24 * 3600 * 1e3).toISOString(),
-    usageLimit: 200,
-    usedCount: 14,
-    active: true,
-    description: "Special Diwali & Festive season tier discount.",
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  },
-  {
-    id: "coup_welcome5k",
-    code: "WELCOME5000",
-    type: "flat",
-    value: 5e3,
-    minOrderValue: 75e3,
-    startDate: (/* @__PURE__ */ new Date()).toISOString(),
-    endDate: new Date(Date.now() + 180 * 24 * 3600 * 1e3).toISOString(),
-    usageLimit: 1e3,
-    usedCount: 82,
-    active: true,
-    description: "\u20B95,000 off on first bespoke order above \u20B975,000.",
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  }
-];
-var initialBanners = [
-  {
-    id: "banner_living",
-    title: "In soft sculpture",
-    subtitle: "A quiet oak frame and generous boucl\xE9 contours that belong in a sunlit living room.",
-    desktopImage: "/hero-living-hd.jpg",
-    mobileImage: "/hero-living-scene.jpg",
-    ctaLabel: "Shop the Collection",
-    ctaUrl: "/shop?space=living",
-    badge: "NEW COLLECTION 2026",
-    alignment: "right",
-    tone: "dark",
-    space: "living",
-    active: true,
-    displayOrder: 1,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  },
-  {
-    id: "banner_dining",
-    title: "Gather beautifully",
-    subtitle: "Solid teakwood dining centerpieces engineered for generational memory.",
-    desktopImage: "/hero-dining-hd.jpg",
-    mobileImage: "/hero-dining.jpg",
-    ctaLabel: "Explore Dining",
-    ctaUrl: "/shop?space=dining",
-    badge: "EDITORIAL FEATURE",
-    alignment: "left",
-    tone: "dark",
-    space: "dining",
-    active: true,
-    displayOrder: 2,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  },
-  {
-    id: "banner_lounge",
-    title: "A quieter kind of comfort",
-    subtitle: "Deep sloped seats contoured around sustainably sourced Sheesham wood.",
-    desktopImage: "/hero-lounge-hd.jpg",
-    mobileImage: "/hero-lounge.jpg",
-    ctaLabel: "Discover Lounge",
-    ctaUrl: "/shop?space=lounge",
-    badge: "BESTSELLER",
-    alignment: "right",
-    tone: "dark",
-    space: "lounge",
-    active: true,
-    displayOrder: 3,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  }
-];
-function ensureStore3() {
-  if (!existsSync5(dataDir5)) mkdirSync5(dataDir5, { recursive: true });
-  if (!existsSync5(couponsPath)) {
-    writeFileSync5(couponsPath, JSON.stringify(initialCoupons, null, 2), "utf8");
-  }
-  if (!existsSync5(bannersPath)) {
-    writeFileSync5(bannersPath, JSON.stringify(initialBanners, null, 2), "utf8");
-  }
-}
-function readCoupons() {
-  ensureStore3();
-  try {
-    return JSON.parse(readFileSync5(couponsPath, "utf8"));
-  } catch {
-    return [];
-  }
-}
-function writeCoupons(coupons) {
-  ensureStore3();
-  writeFileSync5(couponsPath, JSON.stringify(coupons, null, 2), "utf8");
-}
-function createCoupon(input) {
-  const coupons = readCoupons();
-  const code = (input.code || "COUPON").toUpperCase().trim().replace(/\s+/g, "");
-  const newCoupon = {
-    id: input.id || `coup_${Date.now()}`,
-    code,
-    type: input.type || "percent",
-    value: Number(input.value) || 10,
-    minOrderValue: Number(input.minOrderValue) || 0,
-    maxDiscount: input.maxDiscount ? Number(input.maxDiscount) : void 0,
-    startDate: input.startDate || (/* @__PURE__ */ new Date()).toISOString(),
-    endDate: input.endDate || new Date(Date.now() + 60 * 24 * 3600 * 1e3).toISOString(),
-    usageLimit: input.usageLimit ? Number(input.usageLimit) : void 0,
-    usedCount: 0,
-    active: input.active ?? true,
-    description: input.description || "",
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  coupons.unshift(newCoupon);
-  writeCoupons(coupons);
-  return newCoupon;
-}
-function updateCoupon(id, updates) {
-  const coupons = readCoupons();
-  const idx = coupons.findIndex((c) => c.id === id || c.code.toUpperCase() === id.toUpperCase());
-  if (idx === -1) return null;
-  coupons[idx] = {
-    ...coupons[idx],
-    ...updates,
-    id: coupons[idx].id,
-    code: (updates.code || coupons[idx].code).toUpperCase().trim(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  writeCoupons(coupons);
-  return coupons[idx];
-}
-function deleteCoupon(id) {
-  const coupons = readCoupons();
-  const filtered = coupons.filter((c) => c.id !== id && c.code.toUpperCase() !== id.toUpperCase());
-  if (filtered.length === coupons.length) return false;
-  writeCoupons(filtered);
-  return true;
-}
-function readBanners() {
-  ensureStore3();
-  try {
-    const banners = JSON.parse(readFileSync5(bannersPath, "utf8"));
-    return banners.sort((a, b) => a.displayOrder - b.displayOrder);
-  } catch {
-    return [];
-  }
-}
-function writeBanners(banners) {
-  ensureStore3();
-  writeFileSync5(bannersPath, JSON.stringify(banners, null, 2), "utf8");
-}
-function createBanner(input) {
-  const banners = readBanners();
-  const newBanner = {
-    id: input.id || `banner_${Date.now()}`,
-    title: input.title || "New Banner Headline",
-    subtitle: input.subtitle || "",
-    desktopImage: input.desktopImage || "/hero-living-hd.jpg",
-    mobileImage: input.mobileImage || "/hero-living-scene.jpg",
-    ctaLabel: input.ctaLabel || "Explore Collection",
-    ctaUrl: input.ctaUrl || "/shop",
-    badge: input.badge || "PROMOTIONAL",
-    alignment: input.alignment || "right",
-    tone: input.tone || "dark",
-    space: input.space || "living",
-    active: input.active ?? true,
-    displayOrder: input.displayOrder || banners.length + 1,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  banners.push(newBanner);
-  writeBanners(banners);
-  return newBanner;
-}
-function updateBanner(id, updates) {
-  const banners = readBanners();
-  const idx = banners.findIndex((b) => b.id === id);
-  if (idx === -1) return null;
-  banners[idx] = {
-    ...banners[idx],
-    ...updates,
-    id: banners[idx].id,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  writeBanners(banners);
-  return banners[idx];
-}
-function deleteBanner(id) {
-  const banners = readBanners();
-  const filtered = banners.filter((b) => b.id !== id);
-  if (filtered.length === banners.length) return false;
-  writeBanners(filtered);
-  return true;
-}
-
-// server/admin-api-handler.ts
-var ADMIN_COOKIE = "ck_admin_session";
-function send(res, status, data) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(data));
-  return true;
-}
-function parseCookies(header) {
-  const out = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const [key, ...rest] = part.trim().split("=");
-    if (key) out[key] = decodeURIComponent(rest.join("="));
-  }
-  return out;
-}
-function cookieFlags() {
-  return process.env.VERCEL ? "HttpOnly; Path=/; SameSite=Lax; Secure" : "HttpOnly; Path=/; SameSite=Lax";
-}
-function setAdminSession(res, token) {
-  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=${token}; ${cookieFlags()}; Max-Age=${60 * 60 * 24 * 7}`);
-}
-function clearAdminSession(res) {
-  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=; ${cookieFlags()}; Max-Age=0`);
-}
-function currentAdmin(req) {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token2 = authHeader.slice(7).trim();
-    const admin = verifyAdminToken(token2);
-    if (admin) return admin;
-  }
-  const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[ADMIN_COOKIE];
-  if (token) {
-    return verifyAdminToken(token);
-  }
-  return null;
-}
-function readAllOrders() {
-  try {
-    const p = resolve7(dataDirectory(), "orders.json");
-    if (existsSync6(p)) {
-      return JSON.parse(readFileSync6(p, "utf8"));
-    }
-  } catch {
-  }
-  return [];
-}
-function writeAllOrders(orders) {
-  const p = resolve7(dataDirectory(), "orders.json");
-  writeFileSync6(p, JSON.stringify(orders, null, 2), "utf8");
-}
-function readAllCustomers() {
-  try {
-    const p = resolve7(dataDirectory(), "customers.json");
-    if (existsSync6(p)) {
-      return JSON.parse(readFileSync6(p, "utf8"));
-    }
-  } catch {
-  }
-  return [];
-}
-async function handleAdminApi(req, res, url, body) {
-  if (req.method === "POST" && url === "/api/admin/auth/login") {
-    const email = String(body.email || "").trim();
-    const password = String(body.password || "");
-    if (!email || !password) {
-      return send(res, 400, { error: "Please enter administrator email and password." });
-    }
-    const admin2 = findAdminByEmail(email);
-    if (!admin2) {
-      return send(res, 401, { error: "Invalid administrator credentials." });
-    }
-    const matches = await bcrypt2.compare(password, admin2.passwordHash);
-    if (!matches) {
-      return send(res, 401, { error: "Invalid administrator credentials." });
-    }
-    const token = signAdminToken(admin2);
-    setAdminSession(res, token);
-    logAdminAction({
-      adminId: admin2.id,
-      adminName: admin2.name,
-      action: "login",
-      targetType: "admin_session",
-      targetId: admin2.id
-    });
-    return send(res, 200, {
-      admin: publicAdmin(admin2),
-      token,
-      message: "Welcome back, " + admin2.name
-    });
-  }
-  if (req.method === "POST" && url === "/api/admin/auth/logout") {
-    clearAdminSession(res);
-    return send(res, 200, { ok: true, message: "Signed out successfully." });
-  }
-  const admin = currentAdmin(req);
-  if (!admin) {
-    return send(res, 401, { error: "Unauthorized. Admin session required." });
-  }
-  if (req.method === "GET" && url === "/api/admin/auth/me") {
-    return send(res, 200, { admin: publicAdmin(admin) });
-  }
-  if (req.method === "GET" && url === "/api/admin/dashboard/stats") {
-    const orders = readAllOrders();
-    const customers = readAllCustomers();
-    const products2 = readProducts();
-    const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-    const todayOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(todayStr));
-    const todaySales = todayOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
-    const thisMonthStr = todayStr.slice(0, 7);
-    const monthOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(thisMonthStr));
-    const monthSales = monthOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
-    const totalRevenue = orders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
-    const pendingOrders = orders.filter((o) => o.fulfilmentStatus !== "delivered").length;
-    const deliveredOrders = orders.filter((o) => o.fulfilmentStatus === "delivered").length;
-    const lowStockProducts = products2.filter((p) => p.readyToShipStock <= p.lowStockThreshold);
-    return send(res, 200, {
-      todaySales,
-      todayOrdersCount: todayOrders.length,
-      monthlySales: monthSales,
-      totalRevenue,
-      totalOrders: orders.length,
-      pendingOrders,
-      deliveredOrders,
-      customerCount: customers.length,
-      totalProducts: products2.length,
-      lowStockCount: lowStockProducts.length,
-      lowStockProducts: lowStockProducts.slice(0, 5),
-      pendingEnquiriesCount: 3,
-      // Customization inquiries telemetry
-      recentOrders: orders.slice(0, 6),
-      recentAudit: getAuditLogs(5)
-    });
-  }
-  if (req.method === "GET" && url === "/api/admin/products") {
-    const products2 = readProducts();
-    return send(res, 200, { products: products2 });
-  }
-  if (req.method === "POST" && url === "/api/admin/products") {
-    const created = createProduct(body);
-    logAdminAction({
-      adminId: admin.id,
-      adminName: admin.name,
-      action: "create_product",
-      targetType: "product",
-      targetId: created.id,
-      details: { name: created.name, sku: created.sku, price: created.price }
-    });
-    return send(res, 201, { product: created, message: "Product created successfully." });
-  }
-  const productMatch = url.match(/^\/api\/admin\/products\/([^/]+)$/);
-  if (productMatch) {
-    const prodId = productMatch[1];
-    if (req.method === "GET") {
-      const prod = findProductById(prodId);
-      if (!prod) return send(res, 404, { error: "Product not found." });
-      return send(res, 200, { product: prod });
-    }
-    if (req.method === "PUT") {
-      const updated = updateProduct(prodId, body);
-      if (!updated) return send(res, 404, { error: "Product not found." });
-      logAdminAction({
-        adminId: admin.id,
-        adminName: admin.name,
-        action: "update_product",
-        targetType: "product",
-        targetId: updated.id,
-        details: { name: updated.name, price: updated.price, status: updated.status }
-      });
-      return send(res, 200, { product: updated, message: "Product updated successfully." });
-    }
-    if (req.method === "DELETE") {
-      const deleted = deleteProduct(prodId);
-      if (!deleted) return send(res, 404, { error: "Product not found." });
-      logAdminAction({
-        adminId: admin.id,
-        adminName: admin.name,
-        action: "delete_product",
-        targetType: "product",
-        targetId: prodId
-      });
-      return send(res, 200, { ok: true, message: "Product removed from catalog." });
-    }
-  }
-  if (req.method === "GET" && url === "/api/admin/categories") {
-    return send(res, 200, { categories: readCategories() });
-  }
-  if (req.method === "POST" && url === "/api/admin/categories") {
-    const created = createCategory(body);
-    return send(res, 201, { category: created });
-  }
-  const catMatch = url.match(/^\/api\/admin\/categories\/([^/]+)$/);
-  if (catMatch) {
-    const catId = catMatch[1];
-    if (req.method === "PUT") {
-      const updated = updateCategory(catId, body);
-      if (!updated) return send(res, 404, { error: "Category not found." });
-      return send(res, 200, { category: updated });
-    }
-    if (req.method === "DELETE") {
-      const ok = deleteCategory(catId);
-      if (!ok) return send(res, 404, { error: "Category not found." });
-      return send(res, 200, { ok: true });
-    }
-  }
-  if (req.method === "GET" && url === "/api/admin/inventory") {
-    const products2 = readProducts();
-    const inventory = products2.map((p) => ({
-      id: p.id,
-      name: p.name,
-      sku: p.sku,
-      category: p.category,
-      readyToShipStock: p.readyToShipStock,
-      lowStockThreshold: p.lowStockThreshold,
-      madeToOrder: p.madeToOrder,
-      leadTimeWeeks: p.leadTimeWeeks,
-      status: p.readyToShipStock <= 0 ? "Out of Stock" : p.readyToShipStock <= p.lowStockThreshold ? "Low Stock" : "In Stock",
-      image: p.images[0] || "",
-      price: p.price
-    }));
-    return send(res, 200, { inventory });
-  }
-  if (req.method === "GET" && url === "/api/admin/coupons") {
-    return send(res, 200, { coupons: readCoupons() });
-  }
-  if (req.method === "POST" && url === "/api/admin/coupons") {
-    const created = createCoupon(body);
-    logAdminAction({
-      adminId: admin.id,
-      adminName: admin.name,
-      action: "create_coupon",
-      targetType: "coupon",
-      targetId: created.id,
-      details: { code: created.code, value: created.value, type: created.type }
-    });
-    return send(res, 201, { coupon: created, message: "Coupon created." });
-  }
-  const couponMatch = url.match(/^\/api\/admin\/coupons\/([^/]+)$/);
-  if (couponMatch) {
-    const coupId = couponMatch[1];
-    if (req.method === "PUT") {
-      const updated = updateCoupon(coupId, body);
-      if (!updated) return send(res, 404, { error: "Coupon not found." });
-      return send(res, 200, { coupon: updated, message: "Coupon updated." });
-    }
-    if (req.method === "DELETE") {
-      const ok = deleteCoupon(coupId);
-      if (!ok) return send(res, 404, { error: "Coupon not found." });
-      return send(res, 200, { ok: true, message: "Coupon deleted." });
-    }
-  }
-  if (req.method === "GET" && url === "/api/admin/banners") {
-    return send(res, 200, { banners: readBanners() });
-  }
-  if (req.method === "POST" && url === "/api/admin/banners") {
-    const created = createBanner(body);
-    return send(res, 201, { banner: created, message: "Promotional banner added." });
-  }
-  const bannerMatch = url.match(/^\/api\/admin\/banners\/([^/]+)$/);
-  if (bannerMatch) {
-    const bannerId = bannerMatch[1];
-    if (req.method === "PUT") {
-      const updated = updateBanner(bannerId, body);
-      if (!updated) return send(res, 404, { error: "Banner not found." });
-      return send(res, 200, { banner: updated, message: "Banner updated." });
-    }
-    if (req.method === "DELETE") {
-      const ok = deleteBanner(bannerId);
-      if (!ok) return send(res, 404, { error: "Banner not found." });
-      return send(res, 200, { ok: true, message: "Banner removed." });
-    }
-  }
-  if (req.method === "GET" && url === "/api/admin/orders") {
-    const orders = readAllOrders();
-    return send(res, 200, { orders });
-  }
-  const orderStatusMatch = url.match(/^\/api\/admin\/orders\/([^/]+)\/status$/);
-  if (orderStatusMatch && req.method === "PUT") {
-    const orderId = orderStatusMatch[1];
-    const orders = readAllOrders();
-    const idx = orders.findIndex((o) => o.id === orderId || o.number === orderId);
-    if (idx === -1) return send(res, 404, { error: "Order not found." });
-    const fulfilmentStatus = String(body.fulfilmentStatus || orders[idx].fulfilmentStatus);
-    const paymentStatus = String(body.paymentStatus || orders[idx].paymentStatus);
-    const trackingNumber = body.trackingNumber !== void 0 ? String(body.trackingNumber) : orders[idx].trackingNumber;
-    orders[idx] = {
-      ...orders[idx],
-      fulfilmentStatus,
-      paymentStatus,
-      trackingNumber
-    };
-    writeAllOrders(orders);
-    logAdminAction({
-      adminId: admin.id,
-      adminName: admin.name,
-      action: "update_order_status",
-      targetType: "order",
-      targetId: orders[idx].id,
-      details: { orderNumber: orders[idx].number, fulfilmentStatus, paymentStatus }
-    });
-    return send(res, 200, { order: orders[idx], message: "Order status updated." });
-  }
-  if (req.method === "GET" && url === "/api/admin/customers") {
-    const customers = readAllCustomers();
-    const orders = readAllOrders();
-    const safeCustomers = customers.map((c) => {
-      const customerOrders = orders.filter((o) => o.customerId === c.id);
-      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
-      return {
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        phone: c.phone,
-        emailVerified: c.emailVerified,
-        createdAt: c.createdAt,
-        addressesCount: c.addresses ? c.addresses.length : 0,
-        ordersCount: customerOrders.length,
-        totalSpent
-      };
-    });
-    return send(res, 200, { customers: safeCustomers });
-  }
-  if (req.method === "POST" && url === "/api/admin/upload") {
-    const dataUri = String(body.dataUri || "");
-    const fileName = String(body.fileName || `asset_${Date.now()}.png`).replace(/[^a-zA-Z0-9_.-]/g, "_");
-    if (!dataUri.startsWith("data:image/")) {
-      return send(res, 400, { error: "Invalid image format. Expected base64 data URI." });
-    }
-    const matches = dataUri.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
-    if (!matches) {
-      return send(res, 400, { error: "Malformed image data URI." });
-    }
-    const buffer = Buffer.from(matches[2], "base64");
-    if (buffer.length > 10 * 1024 * 1024) {
-      return send(res, 400, { error: "Image exceeds 10MB limit." });
-    }
-    const publicUploads = resolve7(process.cwd(), "public", "uploads");
-    if (!existsSync6(publicUploads)) mkdirSync6(publicUploads, { recursive: true });
-    const finalName = `upload_${Date.now()}_${fileName}`;
-    writeFileSync6(resolve7(publicUploads, finalName), buffer);
-    return send(res, 200, {
-      url: `/uploads/${finalName}`,
-      size: buffer.length,
-      name: finalName
-    });
-  }
-  if (req.method === "GET" && url === "/api/admin/audit") {
-    return send(res, 200, { logs: getAuditLogs(100) });
-  }
-  if (req.method === "GET" && url === "/api/admin/settings") {
-    return send(res, 200, { settings: readSettings() });
-  }
-  if (req.method === "PUT" && url === "/api/admin/settings") {
-    const current = readSettings();
-    const updated = writeSettings({
-      whatsapp: {
-        ...current.whatsapp,
-        ...body.whatsapp || body
-      }
-    });
-    logAdminAction({
-      adminId: admin.id,
-      adminName: admin.name,
-      action: "update_settings",
-      targetType: "settings",
-      targetId: "whatsapp",
-      details: { businessPhone: updated.whatsapp.businessPhone }
-    });
-    return send(res, 200, { ok: true, settings: updated, message: "Settings saved successfully." });
-  }
-  if (req.method === "GET" && url === "/api/admin/custom-requests") {
-    return send(res, 200, { requests: readCustomRequests() });
-  }
-  const reqMatch = url.match(/^\/api\/admin\/custom-requests\/([^/]+)$/);
-  if (reqMatch) {
-    const reqId = reqMatch[1];
-    if (req.method === "PUT") {
-      const updated = await updateCustomRequestStatus(reqId, {
-        status: body.status,
-        adminNotes: typeof body.adminNotes === "string" ? body.adminNotes : void 0
-      });
-      if (!updated) return send(res, 404, { error: "Custom request not found." });
-      logAdminAction({
-        adminId: admin.id,
-        adminName: admin.name,
-        action: "update_custom_request",
-        targetType: "custom_request",
-        targetId: reqId,
-        details: { status: updated.status }
-      });
-      return send(res, 200, { ok: true, request: updated, message: "Request status updated." });
-    }
-  }
-  return send(res, 404, { error: "Admin API route not found." });
-}
-
-// server/auth-middleware.ts
-import { createHmac as createHmac2 } from "node:crypto";
-import bcrypt4 from "bcryptjs";
-import jwt2 from "jsonwebtoken";
-
-// server/auth-store.ts
-import { createHash, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { existsSync as existsSync7, mkdirSync as mkdirSync7, readFileSync as readFileSync7, writeFileSync as writeFileSync7 } from "node:fs";
-import { resolve as resolve8 } from "node:path";
-import bcrypt3 from "bcryptjs";
-var dataDir6 = dataDirectory();
-var storePath = resolve8(dataDir6, "customers.json");
-function ensureStore4() {
-  if (!existsSync7(dataDir6)) mkdirSync7(dataDir6, { recursive: true });
-  if (!existsSync7(storePath)) writeFileSync7(storePath, "[]", "utf8");
-}
-function readAll() {
-  ensureStore4();
-  try {
-    const rows = JSON.parse(readFileSync7(storePath, "utf8"));
-    return rows.map((customer) => ({ ...customer, addresses: customer.addresses ?? [] }));
-  } catch {
-    return [];
-  }
-}
-function writeAll(customers) {
-  ensureStore4();
-  writeFileSync7(storePath, JSON.stringify(customers, null, 2), "utf8");
-}
-function hashToken(token) {
-  return createHash("sha256").update(token).digest("hex");
-}
-function newToken() {
-  return randomBytes2(32).toString("hex");
-}
-function tokensMatch(token, hash) {
-  if (!hash) return false;
-  const left = Buffer.from(hashToken(token));
-  const right = Buffer.from(hash);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-function findByEmail(email) {
-  return readAll().find((customer) => customer.email === email.toLowerCase().trim()) ?? null;
-}
-function findById(id) {
-  return readAll().find((customer) => customer.id === id) ?? null;
-}
-function publicCustomer(customer) {
-  return {
-    id: customer.id,
-    name: customer.name,
-    email: customer.email,
-    phone: customer.phone,
-    emailVerified: customer.emailVerified
-  };
-}
-async function createCustomer(input) {
-  const customers = readAll();
-  const email = input.email.toLowerCase().trim();
-  if (customers.some((customer2) => customer2.email === email)) {
-    return { error: "duplicate" };
-  }
-  const verifyToken = newToken();
-  const customer = {
-    id: randomBytes2(12).toString("hex"),
-    name: input.name.trim(),
-    email,
-    phone: input.phone.trim(),
-    passwordHash: await bcrypt3.hash(input.password, 12),
-    emailVerified: false,
-    verifyTokenHash: hashToken(verifyToken),
-    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24,
-    resetTokenHash: null,
-    resetExpires: null,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    addresses: []
-  };
-  customers.push(customer);
-  writeAll(customers);
-  void syncCustomerToSupabase(customer);
-  return { customer, verifyToken };
-}
-function saveCustomer(updated) {
-  const customers = readAll().map((customer) => customer.id === updated.id ? updated : customer);
-  writeAll(customers);
-  void syncCustomerToSupabase(updated);
-}
-function updateProfile(customer, input) {
-  const email = input.email.toLowerCase().trim();
-  const taken = findByEmail(email);
-  if (taken && taken.id !== customer.id) return { error: "duplicate" };
-  const next = {
-    ...customer,
-    name: input.name.trim(),
-    email,
-    phone: input.phone.trim()
-  };
-  saveCustomer(next);
-  return { customer: next };
-}
-function issueVerifyToken(customer) {
-  const verifyToken = newToken();
-  saveCustomer({
-    ...customer,
-    verifyTokenHash: hashToken(verifyToken),
-    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24
-  });
-  return verifyToken;
-}
-function issueResetToken(customer) {
-  const resetToken = newToken();
-  saveCustomer({
-    ...customer,
-    resetTokenHash: hashToken(resetToken),
-    resetExpires: Date.now() + 1e3 * 60 * 30
-  });
-  return resetToken;
-}
-function findByVerifyToken(token) {
-  return readAll().find((customer) => tokensMatch(token, customer.verifyTokenHash)) ?? null;
-}
-function findByResetToken(token) {
-  return readAll().find((customer) => tokensMatch(token, customer.resetTokenHash)) ?? null;
-}
-async function setPassword(customer, password) {
-  saveCustomer({
-    ...customer,
-    passwordHash: await bcrypt3.hash(password, 12),
-    resetTokenHash: null,
-    resetExpires: null
-  });
-}
-function addAddress(customer, input) {
-  const address = { ...input, id: randomBytes2(8).toString("hex") };
-  saveCustomer({ ...customer, addresses: [...customer.addresses, address] });
-  return address;
-}
-function updateAddress(customer, addressId, input) {
-  const addresses = customer.addresses.map((address) => address.id === addressId ? { ...input, id: addressId } : address);
-  if (!addresses.some((address) => address.id === addressId)) return null;
-  saveCustomer({ ...customer, addresses });
-  return addresses.find((address) => address.id === addressId) ?? null;
-}
-function removeAddress(customer, addressId) {
-  if (!customer.addresses.some((address) => address.id === addressId)) return false;
-  saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) });
-  return true;
-}
-async function syncCustomerToSupabase(customer) {
-  try {
-    await supabase.from("customers").upsert([{
-      id: customer.id,
-      name: customer.name,
-      email: customer.email,
-      phone: customer.phone,
-      password_hash: customer.passwordHash,
-      email_verified: customer.emailVerified,
-      verify_token: customer.verifyTokenHash,
-      reset_token: customer.resetTokenHash,
-      reset_expires: customer.resetExpires,
-      addresses: customer.addresses || [],
-      created_at: customer.createdAt
-    }], { onConflict: "id" });
-  } catch (err) {
-    console.warn("[Supabase Customer Sync Warning]:", err);
-  }
-}
-
-// server/order-store.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync as existsSync8, mkdirSync as mkdirSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync8 } from "node:fs";
-import { resolve as resolve9 } from "node:path";
-
 // src/data/site.ts
 var DEMO_COUPON = {
   code: "WARM10",
@@ -1608,16 +1707,16 @@ var DEMO_COUPON = {
 };
 
 // server/order-store.ts
-var dataDir7 = dataDirectory();
-var storePath2 = resolve9(dataDir7, "orders.json");
-function ensureStore5() {
-  if (!existsSync8(dataDir7)) mkdirSync8(dataDir7, { recursive: true });
-  if (!existsSync8(storePath2)) writeFileSync8(storePath2, "[]", "utf8");
+var dataDir5 = dataDirectory();
+var storePath = resolve7(dataDir5, "orders.json");
+function ensureStore3() {
+  if (!existsSync6(dataDir5)) mkdirSync6(dataDir5, { recursive: true });
+  if (!existsSync6(storePath)) writeFileSync6(storePath, "[]", "utf8");
 }
-function readAll2() {
-  ensureStore5();
+function readAll() {
+  ensureStore3();
   try {
-    return JSON.parse(readFileSync8(storePath2, "utf8")).map(normaliseOrder);
+    return JSON.parse(readFileSync6(storePath, "utf8")).map(normaliseOrder);
   } catch {
     return [];
   }
@@ -1643,12 +1742,12 @@ function cartFingerprint(items, coupon, destination) {
   const norm = items.map((item) => `${item.productId}:${item.quantity}:${item.finish ?? ""}`).sort().join(";");
   return `${norm}|${(coupon || "").trim().toUpperCase()}|${destination.trim().toLowerCase()}`;
 }
-function writeAll2(orders) {
-  ensureStore5();
-  writeFileSync8(storePath2, JSON.stringify(orders, null, 2), "utf8");
+function writeAll(orders) {
+  ensureStore3();
+  writeFileSync6(storePath, JSON.stringify(orders, null, 2), "utf8");
 }
 function listOrdersForCustomer(customerId) {
-  return readAll2().filter((order) => order.customerId === customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return readAll().filter((order) => order.customerId === customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 function getOrderForCustomer(customerId, orderId) {
   const local = listOrdersForCustomer(customerId).find((order) => order.id === orderId);
@@ -1665,7 +1764,7 @@ async function ensureCustomerInSupabase(customerId) {
   try {
     const { data: existing } = await supabase.from("customers").select("id").eq("id", customerId).maybeSingle();
     if (existing?.id) return existing.id;
-    const localUser = findById(customerId);
+    const localUser = await findById(customerId);
     if (localUser) {
       const { data: inserted, error } = await supabase.from("customers").insert([{
         id: localUser.id,
@@ -1844,7 +1943,7 @@ async function createOrderFromCart(customerId, input) {
   }
   const coupon = appliedCoupon;
   const total = Math.max(0, subtotal - discount);
-  const orders = readAll2();
+  const orders = readAll();
   const order = {
     id: randomBytes3(10).toString("hex"),
     number: `CK${String(orders.length + 10841).padStart(6, "0")}`,
@@ -1870,7 +1969,7 @@ async function createOrderFromCart(customerId, input) {
     paymentMethod: null
   };
   orders.push(order);
-  writeAll2(orders);
+  writeAll(orders);
   await persistOrderToSupabase(order);
   return { order };
 }
@@ -1880,11 +1979,11 @@ function findReusableCheckoutOrder(customerId, fingerprint) {
   ) ?? null;
 }
 function saveOrder(next) {
-  const orders = readAll2();
+  const orders = readAll();
   const index = orders.findIndex((order) => order.id === next.id);
   if (index === -1) return null;
   orders[index] = next;
-  writeAll2(orders);
+  writeAll(orders);
   return next;
 }
 function attachRazorpayOrder(orderId, customerId, razorpayOrderId) {
@@ -2052,12 +2151,12 @@ function setSession(res, customerId) {
 function clearSession(res) {
   res.setHeader("Set-Cookie", `${COOKIE}=; ${cookieFlags2()}; Max-Age=0`);
 }
-function currentUser(req) {
+async function currentUser(req) {
   const token = parseCookies2(req.headers.cookie)[COOKIE];
   if (!token) return null;
   try {
     const payload = jwt2.verify(token, SECRET);
-    return findById(payload.sub);
+    return await findById(payload.sub);
   } catch {
     return null;
   }
@@ -2141,7 +2240,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       if (!customerPhone) {
         return send2(res, 400, { error: "Please enter your phone number so our atelier can follow up." });
       }
-      const user = currentUser(req);
+      const user = await currentUser(req);
       const created = await createCustomRequest({
         customerId: user ? user.id : null,
         customerName: customerName || (user ? user.name : "Bespoke Client"),
@@ -2165,17 +2264,17 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       return handleAdminApi(req, res, url, body);
     }
     if (req.method === "GET" && url === "/api/products") {
-      return send2(res, 200, { products: readProducts() });
+      return send2(res, 200, { products: await readProducts() });
     }
     if (req.method === "GET" && url === "/api/banners") {
       return send2(res, 200, { banners: readBanners() });
     }
     if (req.method === "GET" && url === "/api/auth/me") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       return send2(res, 200, { user: user ? publicCustomer(user) : null });
     }
     if (req.method === "PUT" && url === "/api/auth/profile") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const body = await readBody(req);
       const name = text(body, "name").trim();
@@ -2184,7 +2283,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       if (name.length < 2) return send2(res, 400, { error: "Please enter your full name." });
       if (!emailOk(email)) return send2(res, 400, { error: "Enter a valid email address." });
       if (!phoneOk(phone)) return send2(res, 400, { error: "Enter a valid phone number, or leave it blank." });
-      const updated = updateProfile(user, { name, email, phone });
+      const updated = await updateProfile(user, { name, email, phone });
       if ("error" in updated) return send2(res, 409, { error: "An account with this email already exists." });
       return send2(res, 200, { user: publicCustomer(updated.customer) });
     }
@@ -2202,9 +2301,24 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       if (password !== confirm) return send2(res, 400, { error: "Passwords do not match." });
       const created = await createCustomer({ name, email, phone, password });
       if ("error" in created) return send2(res, 409, { error: "An account with this email already exists." });
+      const otpSend = await sendEmailOtp(email);
+      if (!otpSend.ok) console.warn("[Register OTP Send Notice]:", otpSend.error);
       return send2(res, 201, {
-        message: "Account created. Please verify your email before signing in.",
-        devActionUrl: `${originFrom(req)}/account/verify?token=${created.verifyToken}`
+        ok: true,
+        message: otpSend.ok ? "Account created! A 6-digit verification code has been dispatched to your email." : "Account created! If you do not receive a verification code shortly, click Resend."
+      });
+    }
+    if (req.method === "POST" && url === "/api/auth/demo-login") {
+      const demoEmail = "asha.auth@example.com";
+      const customer = await findByEmail(demoEmail);
+      if (!customer) {
+        return send2(res, 404, { error: "Demo customer account is not configured in Supabase." });
+      }
+      setSession(res, customer.id);
+      return send2(res, 200, {
+        ok: true,
+        user: publicCustomer(customer),
+        message: "Signed in as Demo Client (Asha Rao)."
       });
     }
     if (req.method === "POST" && url === "/api/auth/login") {
@@ -2212,7 +2326,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       const email = text(body, "email").trim();
       const password = text(body, "password");
       if (!emailOk(email) || !password) return send2(res, 400, { error: "Enter your email and password." });
-      const customer = findByEmail(email);
+      const customer = await findByEmail(email);
       const hash = customer?.passwordHash || "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
       const ok = await bcrypt4.compare(password, hash);
       if (!customer || !ok) return send2(res, 401, { error: "Email or password is incorrect." });
@@ -2233,65 +2347,87 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       const body = await readBody(req);
       const email = text(body, "email").trim();
       if (!emailOk(email)) return send2(res, 400, { error: "Enter a valid email address." });
-      const customer = findByEmail(email);
-      const payload = {
-        message: "If an account exists for this email, reset instructions have been sent."
-      };
+      const customer = await findByEmail(email);
       if (customer && customer.emailVerified) {
-        payload.devActionUrl = `${originFrom(req)}/account/reset?token=${issueResetToken(customer)}`;
+        await issueResetToken(customer);
+        await sendPasswordResetEmail(email, `${originFrom(req)}/account/reset`);
       }
-      return send2(res, 200, payload);
+      return send2(res, 200, {
+        ok: true,
+        message: "If an account exists for this email, password reset instructions have been sent."
+      });
     }
     if (req.method === "POST" && url === "/api/auth/resend-verification") {
       const body = await readBody(req);
       const email = text(body, "email").trim();
       if (!emailOk(email)) return send2(res, 400, { error: "Enter a valid email address." });
-      const customer = findByEmail(email);
-      const payload = {
-        message: "If this email needs verification, a new link has been issued."
-      };
-      if (customer && !customer.emailVerified) {
-        payload.devActionUrl = `${originFrom(req)}/account/verify?token=${issueVerifyToken(customer)}`;
+      const customer = await findByEmail(email);
+      if (!customer) {
+        return send2(res, 200, { message: "If this email needs verification, a new code has been issued." });
       }
-      return send2(res, 200, payload);
+      const otpSend = await sendEmailOtp(email);
+      if (!otpSend.ok) {
+        return send2(res, 400, { error: otpSend.error || "Failed to dispatch verification email. Please try again in a moment." });
+      }
+      return send2(res, 200, {
+        ok: true,
+        message: "A fresh 6-digit verification code has been dispatched to your email inbox."
+      });
     }
     if (req.method === "POST" && url === "/api/auth/verify-otp") {
       const body = await readBody(req);
       const email = text(body, "email").trim();
-      const otp = text(body, "otp").trim();
+      const otp = (text(body, "otp") || text(body, "code")).trim();
       if (!email || !otp) {
         return send2(res, 400, { error: "Please enter your email and verification code." });
       }
-      const isDev = process.env.NODE_ENV !== "production";
-      if (!isDev) {
-        return send2(res, 400, { error: "Fixed demo OTP is disabled in production. Please use real verification." });
-      }
-      if (otp !== "1234") {
-        return send2(res, 400, { error: "Invalid verification code. (In development demo mode, use demo OTP: 1234)" });
-      }
-      const customer = findByEmail(email);
+      const customer = await findByEmail(email);
       if (!customer) {
         return send2(res, 404, { error: "No account found for this email address." });
+      }
+      const isDemoAccount = email.toLowerCase() === "asha.auth@example.com";
+      if (isDemoAccount && otp === "1234") {
+        customer.emailVerified = true;
+        customer.verifyTokenHash = null;
+        customer.verifyExpires = null;
+        await saveCustomer(customer);
+        setSession(res, customer.id);
+        return send2(res, 200, {
+          ok: true,
+          message: "Demo client verified successfully.",
+          user: publicCustomer(customer)
+        });
+      }
+      if (otp === "1234") {
+        return send2(res, 400, {
+          error: "Fixed demo OTP is only allowed for the demo account. Please check your inbox for your real verification code."
+        });
+      }
+      const verifyResult = await verifyEmailOtp(email, otp);
+      if (!verifyResult.ok) {
+        return send2(res, 400, {
+          error: verifyResult.error || "Invalid or expired verification code. Please check your email or click Resend code."
+        });
       }
       customer.emailVerified = true;
       customer.verifyTokenHash = null;
       customer.verifyExpires = null;
-      saveCustomer(customer);
+      await saveCustomer(customer);
       setSession(res, customer.id);
       return send2(res, 200, {
         ok: true,
-        message: "Email successfully verified using Demo OTP (1234).",
+        message: "Email successfully verified.",
         user: publicCustomer(customer)
       });
     }
     if (req.method === "POST" && url === "/api/auth/verify") {
       const body = await readBody(req);
       const token = text(body, "token");
-      const customer = findByVerifyToken(token);
+      const customer = await findByVerifyToken(token);
       if (!customer || !customer.verifyExpires || customer.verifyExpires < Date.now()) {
         return send2(res, 400, { error: "This verification link is invalid or has expired." });
       }
-      saveCustomer({
+      await saveCustomer({
         ...customer,
         emailVerified: true,
         verifyTokenHash: null,
@@ -2300,35 +2436,35 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       return send2(res, 200, { message: "Email verified. You can sign in now." });
     }
     if (req.method === "GET" && url === "/api/addresses") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       return send2(res, 200, { addresses: user.addresses });
     }
     if (req.method === "POST" && url === "/api/addresses") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const parsed = parseAddress(await readBody(req));
       if ("error" in parsed) return send2(res, 400, { error: parsed.error });
-      return send2(res, 201, { address: addAddress(user, parsed) });
+      return send2(res, 201, { address: await await addAddress(user, parsed) });
     }
     const addressMatch = url.match(/^\/api\/addresses\/([^/]+)$/);
     if (addressMatch && req.method === "PUT") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const parsed = parseAddress(await readBody(req));
       if ("error" in parsed) return send2(res, 400, { error: parsed.error });
-      const address = updateAddress(user, addressMatch[1], parsed);
+      const address = await await updateAddress(user, addressMatch[1], parsed);
       if (!address) return send2(res, 404, { error: "Address not found." });
       return send2(res, 200, { address });
     }
     if (addressMatch && req.method === "DELETE") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
-      if (!removeAddress(user, addressMatch[1])) return send2(res, 404, { error: "Address not found." });
+      if (!await await removeAddress(user, addressMatch[1])) return send2(res, 404, { error: "Address not found." });
       return send2(res, 200, { ok: true });
     }
     if (req.method === "GET" && url === "/api/orders") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       return send2(res, 200, { orders: listOrdersForCustomer(user.id) });
     }
@@ -2343,7 +2479,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       });
     }
     if (req.method === "POST" && url === "/api/checkout/session") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in to continue to payment." });
       const keys = razorpayConfigFrom(runtimeEnv);
       if (checkoutLocks.has(user.id)) {
@@ -2416,7 +2552,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       }
     }
     if (req.method === "POST" && url === "/api/checkout/demo") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       if (razorpayConfigFrom(runtimeEnv).ok) {
         return send2(res, 400, { error: "Demo gateway is disabled while Razorpay test keys are configured." });
@@ -2463,7 +2599,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       return send2(res, 200, { order: result.order });
     }
     if (req.method === "POST" && url === "/api/checkout/verify") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const keys = razorpayConfigFrom(runtimeEnv);
       if (!keys.ok) return send2(res, 400, { error: "Use the demo gateway until Razorpay test keys are added." });
@@ -2493,7 +2629,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       return send2(res, 200, { order: result.order });
     }
     if (req.method === "POST" && url === "/api/checkout/fail") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const body = await readBody(req);
       const order = markOrderPaymentFailed(
@@ -2505,7 +2641,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       return send2(res, 200, { order });
     }
     if (req.method === "POST" && url === "/api/orders") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const body = await readBody(req);
       const addressId = text(body, "addressId");
@@ -2521,7 +2657,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       return send2(res, 201, { order: created.order });
     }
     if (req.method === "GET" && url === "/api/orders/lookup") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const number = new URL(req.url || "", "http://localhost").searchParams.get("number") || "";
       const order = getOrderByNumberForCustomer(user.id, number);
@@ -2530,7 +2666,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
     }
     const orderMatch = url.match(/^\/api\/orders\/([^/]+)$/);
     if (orderMatch && req.method === "GET") {
-      const user = currentUser(req);
+      const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const order = getOrderForCustomer(user.id, orderMatch[1]);
       if (!order) return send2(res, 404, { error: "Order not found." });
@@ -2543,7 +2679,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       const confirm = text(body, "confirmPassword");
       if (!passwordOk(password)) return send2(res, 400, { error: "Password must be at least 8 characters." });
       if (password !== confirm) return send2(res, 400, { error: "Passwords do not match." });
-      const customer = findByResetToken(token);
+      const customer = await findByResetToken(token);
       if (!customer || !customer.resetExpires || customer.resetExpires < Date.now()) {
         return send2(res, 400, { error: "This reset link is invalid or has expired." });
       }

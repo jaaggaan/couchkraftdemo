@@ -24,7 +24,6 @@ export function AuthModal() {
   const [errors, setErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
-  const [devUrl, setDevUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [otp, setOtp] = useState('')
 
@@ -33,7 +32,6 @@ export function AuthModal() {
     setErrors({})
     setFormError('')
     setFormSuccess('')
-    setDevUrl('')
     setBusy(false)
     const previous = document.activeElement
     const onKey = (event: KeyboardEvent) => {
@@ -124,7 +122,7 @@ export function AuthModal() {
       window.setTimeout(() => closeAuth(), 600)
       return
     }
-    setFormError(result.error || 'Verification failed. In development demo mode, use demo OTP: 1234')
+    setFormError(result.error || 'Verification failed. Please check your verification code.')
   }
 
   const submitForgot = async () => {
@@ -137,7 +135,6 @@ export function AuthModal() {
     const result = await authApi.forgot(email)
     setBusy(false)
     setFormSuccess(result.message || 'If an account exists, reset instructions have been sent.')
-    setDevUrl(result.devActionUrl || '')
   }
 
   return (
@@ -216,22 +213,39 @@ export function AuthModal() {
                   onClick={() => {
                     void authApi.resend(email).then((result) => {
                       setFormSuccess(result.message || 'Verification sent.')
-                      setDevUrl(result.devActionUrl || '')
-                    })
+                                      })
                   }}
                 >
                   Resend verification email
                 </button>
               ) : null}
               {formSuccess ? <p className="auth-success">{formSuccess}</p> : null}
-              {devUrl && view === 'signin' ? (
-                <p className="auth-dev">
-                  Local setup has no email delivery. <a href={devUrl}>Verify your email</a>
-                </p>
-              ) : null}
+
               <button className="btn auth-submit" type="submit" disabled={busy}>
                 {busy ? 'Signing in…' : 'Sign In'}
               </button>
+              <div className="auth-demo" style={{ marginTop: 14 }}>
+                <p className="auth-demo-label">Demonstration Access</p>
+                <button
+                  type="button"
+                  className="auth-text-link"
+                  style={{ fontWeight: 600, color: 'var(--primary)' }}
+                  onClick={async () => {
+                    setBusy(true)
+                    setFormError('')
+                    const res = await authApi.demoLogin()
+                    setBusy(false)
+                    if (res.user) {
+                      await refresh()
+                      closeAuth()
+                    } else {
+                      setFormError(res.error || 'Demo signin failed.')
+                    }
+                  }}
+                >
+                  Quick Sign-in as Demo Client (Asha Rao)
+                </button>
+              </div>
             </form>
             <p className="auth-switch">
               New to CouchKraft?{' '}
@@ -298,11 +312,7 @@ export function AuthModal() {
               </p>
               {formError ? <p className="auth-error">{formError}</p> : null}
               {formSuccess ? <p className="auth-success">{formSuccess}</p> : null}
-              {devUrl ? (
-                <p className="auth-dev">
-                  Local setup has no email delivery. <a href={devUrl}>Verify your email</a>
-                </p>
-              ) : null}
+
               <button className="btn auth-submit" type="submit" disabled={busy}>
                 {busy ? 'Creating account…' : 'Create account'}
               </button>
@@ -322,23 +332,25 @@ export function AuthModal() {
             <p className="auth-lead">
               Enter the verification code sent to <strong>{email}</strong>.
             </p>
-            <div className="auth-demo">
-              <p className="auth-demo-label">Development / Demo Mode</p>
-              <p>
-                Demo OTP: <code>1234</code>
-              </p>
-              <button
-                type="button"
-                className="auth-text-link"
-                onClick={() => {
-                  setOtp('1234')
-                  setErrors({})
-                  setFormError('')
-                }}
-              >
-                Auto-fill demo OTP (1234)
-              </button>
-            </div>
+            {email.toLowerCase() === 'asha.auth@example.com' ? (
+              <div className="auth-demo">
+                <p className="auth-demo-label">Demo Account Verification</p>
+                <p>
+                  Demo OTP: <code>1234</code> (Restricted to demo client)
+                </p>
+                <button
+                  type="button"
+                  className="auth-text-link"
+                  onClick={() => {
+                    setOtp('1234')
+                    setErrors({})
+                    setFormError('')
+                  }}
+                >
+                  Auto-fill demo OTP (1234)
+                </button>
+              </div>
+            ) : null}
             <form
               onSubmit={(event) => {
                 event.preventDefault()
@@ -350,7 +362,7 @@ export function AuthModal() {
                 <input
                   type="text"
                   maxLength={6}
-                  placeholder="e.g. 1234"
+                  placeholder={email.toLowerCase() === 'asha.auth@example.com' ? 'e.g. 1234' : '6-digit code'}
                   value={otp}
                   onChange={(e) => setOtp(e.target.value)}
                   autoFocus
@@ -410,11 +422,7 @@ export function AuthModal() {
               </label>
               {formError ? <p className="auth-error">{formError}</p> : null}
               {formSuccess ? <p className="auth-success">{formSuccess}</p> : null}
-              {devUrl ? (
-                <p className="auth-dev">
-                  Local setup has no email delivery. <a href={devUrl}>Continue with reset link</a>
-                </p>
-              ) : null}
+
               <button className="btn auth-submit" type="submit" disabled={busy}>
                 {busy ? 'Sending…' : 'Send reset link'}
               </button>

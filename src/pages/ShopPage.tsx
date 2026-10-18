@@ -17,6 +17,43 @@ const spaces: { id: ProductSpace | 'all'; label: string }[] = [
 
 const types = ['Sofa', 'Chair', 'Table', 'Bed', 'Daybed', 'Ottoman', 'Storage', 'Mirror', 'Lighting'] as const
 
+function matchesCategory(product: { category?: string; name?: string }, type: string): boolean {
+  if (type === 'all') return true
+  const cat = (product.category || '').toLowerCase()
+  const name = (product.name || '').toLowerCase()
+  const t = type.toLowerCase()
+
+  if (t === 'sofa') {
+    return cat.includes('sofa') || cat.includes('couch') || name.includes('sofa')
+  }
+  if (t === 'chair') {
+    return (cat.includes('chair') || name.includes('chair')) && !cat.includes('table') && !name.includes('table')
+  }
+  if (t === 'table') {
+    return cat.includes('table') || name.includes('table')
+  }
+  if (t === 'bed') {
+    return (cat.includes('bed') || name.includes('bed')) && !cat.includes('daybed') && !name.includes('daybed')
+  }
+  if (t === 'daybed') {
+    return cat.includes('daybed') || name.includes('daybed')
+  }
+  if (t === 'storage') {
+    return cat.includes('storage') || cat.includes('sideboard') || cat.includes('credenza') || name.includes('sideboard')
+  }
+  if (t === 'mirror') {
+    return cat.includes('mirror') || name.includes('mirror')
+  }
+  if (t === 'lighting') {
+    return cat.includes('lighting') || cat.includes('pendant') || cat.includes('lamp') || name.includes('pendant')
+  }
+  if (t === 'ottoman') {
+    return cat.includes('ottoman') || name.includes('ottoman')
+  }
+
+  return cat.includes(t) || name.includes(t) || product.category === type
+}
+
 export function ShopPage() {
   const [customModalOpen, setCustomModalOpen] = useState(false)
   const [params, setParams] = useSearchParams()
@@ -33,7 +70,7 @@ export function ShopPage() {
         )
       : liveProducts
     if (space !== 'all') list = list.filter((product) => product.space === space)
-    if (type !== 'all') list = list.filter((product) => product.category === type)
+    if (type !== 'all') list = list.filter((product) => matchesCategory(product, type))
     if (sort === 'price-asc') list = [...list].sort((a, b) => a.price - b.price)
     if (sort === 'price-desc') list = [...list].sort((a, b) => b.price - a.price)
     if (sort === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name))

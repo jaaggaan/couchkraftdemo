@@ -16,7 +16,6 @@ import {
   findByResetToken,
   findByVerifyToken,
   issueResetToken,
-  issueVerifyToken,
   publicCustomer,
   removeAddress,
   saveCustomer,
@@ -24,6 +23,10 @@ import {
   updateProfile,
   updateAddress,
   type Address,
+  type Customer,
+  sendEmailOtp,
+  verifyEmailOtp,
+  sendPasswordResetEmail,
 } from './auth-store.ts'
 import {
   attachRazorpayOrder,
@@ -94,12 +97,12 @@ function clearSession(res: ServerResponse) {
   res.setHeader('Set-Cookie', `${COOKIE}=; ${cookieFlags()}; Max-Age=0`)
 }
 
-function currentUser(req: IncomingMessage) {
+async function currentUser(req: IncomingMessage): Promise<Customer | null> {
   const token = parseCookies(req.headers.cookie)[COOKIE]
   if (!token) return null
   try {
     const payload = jwt.verify(token, SECRET) as { sub: string }
-    return findById(payload.sub)
+    return await findById(payload.sub)
   } catch {
     return null
   }
@@ -208,7 +211,7 @@ export async function handleCouchkraftApi(
             if (!customerPhone) {
               return send(res, 400, { error: 'Please enter your phone number so our atelier can follow up.' })
             }
-            const user = currentUser(req)
+            const user = await currentUser(req)
             const created = await createCustomRequest({
               customerId: user ? user.id : null,
               customerName: customerName || (user ? user.name : 'Bespoke Client'),
@@ -234,7 +237,7 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'GET' && url === '/api/products') {
-            return send(res, 200, { products: readProducts() })
+            return send(res, 200, { products: await readProducts() })
           }
 
           if (req.method === 'GET' && url === '/api/banners') {
@@ -242,12 +245,12 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'GET' && url === '/api/auth/me') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             return send(res, 200, { user: user ? publicCustomer(user) : null })
           }
 
           if (req.method === 'PUT' && url === '/api/auth/profile') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const body = await readBody(req)
             const name = text(body, 'name').trim()
@@ -256,7 +259,7 @@ export async function handleCouchkraftApi(
             if (name.length < 2) return send(res, 400, { error: 'Please enter your full name.' })
             if (!emailOk(email)) return send(res, 400, { error: 'Enter a valid email address.' })
             if (!phoneOk(phone)) return send(res, 400, { error: 'Enter a valid phone number, or leave it blank.' })
-            const updated = updateProfile(user, { name, email, phone })
+            const updated = await updateProfile(user, { name, email, phone })
             if ('error' in updated) return send(res, 409, { error: 'An account with this email already exists.' })
             return send(res, 200, { user: publicCustomer(updated.customer) })
           }
@@ -275,9 +278,29 @@ export async function handleCouchkraftApi(
             if (password !== confirm) return send(res, 400, { error: 'Passwords do not match.' })
             const created = await createCustomer({ name, email, phone, password })
             if ('error' in created) return send(res, 409, { error: 'An account with this email already exists.' })
+
+            // Dispatch real email OTP via Supabase Auth
+            const otpSend = await sendEmailOtp(email)
+            if (!otpSend.ok) console.warn('[Register OTP Send Notice]:', otpSend.error)
             return send(res, 201, {
-              message: 'Account created. Please verify your email before signing in.',
-              devActionUrl: `${originFrom(req)}/account/verify?token=${created.verifyToken}`,
+              ok: true,
+              message: otpSend.ok
+                ? 'Account created! A 6-digit verification code has been dispatched to your email.'
+                : 'Account created! If you do not receive a verification code shortly, click Resend.',
+            })
+          }
+
+                    if (req.method === 'POST' && url === '/api/auth/demo-login') {
+            const demoEmail = 'asha.auth@example.com'
+            const customer = await findByEmail(demoEmail)
+            if (!customer) {
+              return send(res, 404, { error: 'Demo customer account is not configured in Supabase.' })
+            }
+            setSession(res, customer.id)
+            return send(res, 200, {
+              ok: true,
+              user: publicCustomer(customer),
+              message: 'Signed in as Demo Client (Asha Rao).',
             })
           }
 
@@ -286,7 +309,7 @@ export async function handleCouchkraftApi(
             const email = text(body, 'email').trim()
             const password = text(body, 'password')
             if (!emailOk(email) || !password) return send(res, 400, { error: 'Enter your email and password.' })
-            const customer = findByEmail(email)
+            const customer = await findByEmail(email)
             const hash = customer?.passwordHash || '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy'
             const ok = await bcrypt.compare(password, hash)
             if (!customer || !ok) return send(res, 401, { error: 'Email or password is incorrect.' })
@@ -309,63 +332,90 @@ export async function handleCouchkraftApi(
             const body = await readBody(req)
             const email = text(body, 'email').trim()
             if (!emailOk(email)) return send(res, 400, { error: 'Enter a valid email address.' })
-            const customer = findByEmail(email)
-            const payload: { message: string; devActionUrl?: string } = {
-              message: 'If an account exists for this email, reset instructions have been sent.',
-            }
+            const customer = await findByEmail(email)
             if (customer && customer.emailVerified) {
-              payload.devActionUrl = `${originFrom(req)}/account/reset?token=${issueResetToken(customer)}`
+              await issueResetToken(customer)
+              await sendPasswordResetEmail(email, `${originFrom(req)}/account/reset`)
             }
-            return send(res, 200, payload)
+            return send(res, 200, {
+              ok: true,
+              message: 'If an account exists for this email, password reset instructions have been sent.',
+            })
           }
 
           if (req.method === 'POST' && url === '/api/auth/resend-verification') {
             const body = await readBody(req)
             const email = text(body, 'email').trim()
             if (!emailOk(email)) return send(res, 400, { error: 'Enter a valid email address.' })
-            const customer = findByEmail(email)
-            const payload: { message: string; devActionUrl?: string } = {
-              message: 'If this email needs verification, a new link has been issued.',
+            const customer = await findByEmail(email)
+            if (!customer) {
+              return send(res, 200, { message: 'If this email needs verification, a new code has been issued.' })
             }
-            if (customer && !customer.emailVerified) {
-              payload.devActionUrl = `${originFrom(req)}/account/verify?token=${issueVerifyToken(customer)}`
+
+            const otpSend = await sendEmailOtp(email)
+            if (!otpSend.ok) {
+              return send(res, 400, { error: otpSend.error || 'Failed to dispatch verification email. Please try again in a moment.' })
             }
-            return send(res, 200, payload)
+
+            return send(res, 200, {
+              ok: true,
+              message: 'A fresh 6-digit verification code has been dispatched to your email inbox.',
+            })
           }
 
           if (req.method === 'POST' && url === '/api/auth/verify-otp') {
             const body = await readBody(req)
             const email = text(body, 'email').trim()
-            const otp = text(body, 'otp').trim()
+            const otp = (text(body, 'otp') || text(body, 'code')).trim()
 
             if (!email || !otp) {
               return send(res, 400, { error: 'Please enter your email and verification code.' })
             }
 
-            const isDev = process.env.NODE_ENV !== 'production'
-
-            if (!isDev) {
-              return send(res, 400, { error: 'Fixed demo OTP is disabled in production. Please use real verification.' })
-            }
-
-            if (otp !== '1234') {
-              return send(res, 400, { error: 'Invalid verification code. (In development demo mode, use demo OTP: 1234)' })
-            }
-
-            const customer = findByEmail(email)
+            const customer = await findByEmail(email)
             if (!customer) {
               return send(res, 404, { error: 'No account found for this email address.' })
             }
 
+            // 1. Explicitly isolated demo mechanism: strictly for demo client
+            const isDemoAccount = email.toLowerCase() === 'asha.auth@example.com'
+            if (isDemoAccount && otp === '1234') {
+              customer.emailVerified = true
+              customer.verifyTokenHash = null
+              customer.verifyExpires = null
+              await saveCustomer(customer)
+              setSession(res, customer.id)
+              return send(res, 200, {
+                ok: true,
+                message: 'Demo client verified successfully.',
+                user: publicCustomer(customer),
+              })
+            }
+
+            // Fixed demo OTP is strictly forbidden for real customer accounts
+            if (otp === '1234') {
+              return send(res, 400, {
+                error: 'Fixed demo OTP is only allowed for the demo account. Please check your inbox for your real verification code.',
+              })
+            }
+
+            // 2. Real email OTP verification via Supabase Auth
+            const verifyResult = await verifyEmailOtp(email, otp)
+            if (!verifyResult.ok) {
+              return send(res, 400, {
+                error: verifyResult.error || 'Invalid or expired verification code. Please check your email or click Resend code.',
+              })
+            }
+
+            // 3. Mark customer verified in Supabase customers table and establish session
             customer.emailVerified = true
             customer.verifyTokenHash = null
             customer.verifyExpires = null
-            saveCustomer(customer)
-
+            await saveCustomer(customer)
             setSession(res, customer.id)
             return send(res, 200, {
               ok: true,
-              message: 'Email successfully verified using Demo OTP (1234).',
+              message: 'Email successfully verified.',
               user: publicCustomer(customer),
             })
           }
@@ -373,11 +423,11 @@ export async function handleCouchkraftApi(
           if (req.method === 'POST' && url === '/api/auth/verify') {
             const body = await readBody(req)
             const token = text(body, 'token')
-            const customer = findByVerifyToken(token)
+            const customer = await findByVerifyToken(token)
             if (!customer || !customer.verifyExpires || customer.verifyExpires < Date.now()) {
               return send(res, 400, { error: 'This verification link is invalid or has expired.' })
             }
-            saveCustomer({
+            await saveCustomer({
               ...customer,
               emailVerified: true,
               verifyTokenHash: null,
@@ -387,38 +437,38 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'GET' && url === '/api/addresses') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             return send(res, 200, { addresses: user.addresses })
           }
 
           if (req.method === 'POST' && url === '/api/addresses') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const parsed = parseAddress(await readBody(req))
             if ('error' in parsed) return send(res, 400, { error: parsed.error })
-            return send(res, 201, { address: addAddress(user, parsed) })
+            return send(res, 201, { address: await await addAddress(user, parsed) })
           }
 
           const addressMatch = url.match(/^\/api\/addresses\/([^/]+)$/)
           if (addressMatch && req.method === 'PUT') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const parsed = parseAddress(await readBody(req))
             if ('error' in parsed) return send(res, 400, { error: parsed.error })
-            const address = updateAddress(user, addressMatch[1], parsed)
+            const address = await await updateAddress(user, addressMatch[1], parsed)
             if (!address) return send(res, 404, { error: 'Address not found.' })
             return send(res, 200, { address })
           }
           if (addressMatch && req.method === 'DELETE') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
-            if (!removeAddress(user, addressMatch[1])) return send(res, 404, { error: 'Address not found.' })
+            if (!(await await removeAddress(user, addressMatch[1]))) return send(res, 404, { error: 'Address not found.' })
             return send(res, 200, { ok: true })
           }
 
           if (req.method === 'GET' && url === '/api/orders') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             return send(res, 200, { orders: listOrdersForCustomer(user.id) })
           }
@@ -435,7 +485,7 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'POST' && url === '/api/checkout/session') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in to continue to payment.' })
             const keys = razorpayConfigFrom(runtimeEnv)
             if (checkoutLocks.has(user.id)) {
@@ -445,7 +495,7 @@ export async function handleCouchkraftApi(
             try {
               const body = await readBody(req)
               const addressId = text(body, 'addressId')
-              const ownedAddress = addressId ? (user.addresses.find((entry) => entry.id === addressId) ?? null) : null
+              const ownedAddress = addressId ? (user.addresses.find((entry: any) => entry.id === addressId) ?? null) : null
               if (addressId && !ownedAddress) return send(res, 400, { error: 'Choose a saved address that belongs to you.' })
               let address = ownedAddress
               if (!address) {
@@ -509,7 +559,7 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'POST' && url === '/api/checkout/demo') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             if (razorpayConfigFrom(runtimeEnv).ok) {
               return send(res, 400, { error: 'Demo gateway is disabled while Razorpay test keys are configured.' })
@@ -557,7 +607,7 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'POST' && url === '/api/checkout/verify') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const keys = razorpayConfigFrom(runtimeEnv)
             if (!keys.ok) return send(res, 400, { error: 'Use the demo gateway until Razorpay test keys are added.' })
@@ -591,7 +641,7 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'POST' && url === '/api/checkout/fail') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const body = await readBody(req)
             const order = markOrderPaymentFailed(
@@ -604,11 +654,11 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'POST' && url === '/api/orders') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const body = await readBody(req)
             const addressId = text(body, 'addressId')
-            const address = addressId ? (user.addresses.find((entry) => entry.id === addressId) ?? null) : null
+            const address = addressId ? (user.addresses.find((entry: any) => entry.id === addressId) ?? null) : null
             if (addressId && !address) return send(res, 400, { error: 'Choose a saved address that belongs to you.' })
             const items = parseCartItems(body)
             const created = await createOrderFromCart(user.id, {
@@ -621,7 +671,7 @@ export async function handleCouchkraftApi(
           }
 
           if (req.method === 'GET' && url === '/api/orders/lookup') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const number = new URL(req.url || '', 'http://localhost').searchParams.get('number') || ''
             const order = getOrderByNumberForCustomer(user.id, number)
@@ -631,7 +681,7 @@ export async function handleCouchkraftApi(
 
           const orderMatch = url.match(/^\/api\/orders\/([^/]+)$/)
           if (orderMatch && req.method === 'GET') {
-            const user = currentUser(req)
+            const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const order = getOrderForCustomer(user.id, orderMatch[1])
             if (!order) return send(res, 404, { error: 'Order not found.' })
@@ -645,7 +695,7 @@ export async function handleCouchkraftApi(
             const confirm = text(body, 'confirmPassword')
             if (!passwordOk(password)) return send(res, 400, { error: 'Password must be at least 8 characters.' })
             if (password !== confirm) return send(res, 400, { error: 'Passwords do not match.' })
-            const customer = findByResetToken(token)
+            const customer = await findByResetToken(token)
             if (!customer || !customer.resetExpires || customer.resetExpires < Date.now()) {
               return send(res, 400, { error: 'This reset link is invalid or has expired.' })
             }

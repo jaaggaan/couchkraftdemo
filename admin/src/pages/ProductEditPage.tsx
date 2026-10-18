@@ -648,7 +648,7 @@ export function ProductEditPage() {
                 <select value={form.category} onChange={e => set('category', e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
                   <option>Living Room &gt; Sofas &amp; Couches</option>
                   <option>Bedroom &gt; Lounge Chairs</option>
-                  <option>Dining &gt; Benches</option>
+                  <option>Dining &gt; Benches &amp; Storage</option>
                   <option>Study &gt; Accent Seating</option>
                 </select>
               </Field>

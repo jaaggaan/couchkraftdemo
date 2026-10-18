@@ -174,7 +174,7 @@ export async function handleAdminApi(
   if (req.method === 'GET' && url === '/api/admin/dashboard/stats') {
     const orders = readAllOrders()
     const customers = readAllCustomers()
-    const products = readProducts()
+    const products = await readProducts()
 
     const todayStr = new Date().toISOString().split('T')[0]
     const todayOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(todayStr))
@@ -209,88 +209,121 @@ export async function handleAdminApi(
 
   // 4. PRODUCT MANAGEMENT
   if (req.method === 'GET' && url === '/api/admin/products') {
-    const products = readProducts()
-    return send(res, 200, { products })
+    try {
+      const products = await readProducts()
+      return send(res, 200, { products })
+    } catch (err: any) {
+      return send(res, 500, { error: err.message || 'Failed to fetch products from Supabase.' })
+    }
   }
 
   if (req.method === 'POST' && url === '/api/admin/products') {
-    const created = createProduct(body)
-    logAdminAction({
-      adminId: admin.id,
-      adminName: admin.name,
-      action: 'create_product',
-      targetType: 'product',
-      targetId: created.id,
-      details: { name: created.name, sku: created.sku, price: created.price },
-    })
-    return send(res, 201, { product: created, message: 'Product created successfully.' })
+    try {
+      const created = await createProduct(body)
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: 'create_product',
+        targetType: 'product',
+        targetId: created.id,
+        details: { name: created.name, sku: created.sku, price: created.price },
+      })
+      return send(res, 201, { product: created, message: 'Product created and published to Supabase successfully.' })
+    } catch (err: any) {
+      return send(res, 400, { error: err.message || 'Failed to create product in Supabase.' })
+    }
   }
 
   const productMatch = url.match(/^\/api\/admin\/products\/([^/]+)$/)
   if (productMatch) {
     const prodId = productMatch[1]
     if (req.method === 'GET') {
-      const prod = findProductById(prodId)
+      const prod = await findProductById(prodId)
       if (!prod) return send(res, 404, { error: 'Product not found.' })
       return send(res, 200, { product: prod })
     }
 
     if (req.method === 'PUT') {
-      const updated = updateProduct(prodId, body)
-      if (!updated) return send(res, 404, { error: 'Product not found.' })
-      logAdminAction({
-        adminId: admin.id,
-        adminName: admin.name,
-        action: 'update_product',
-        targetType: 'product',
-        targetId: updated.id,
-        details: { name: updated.name, price: updated.price, status: updated.status },
-      })
-      return send(res, 200, { product: updated, message: 'Product updated successfully.' })
+      try {
+        const updated = await updateProduct(prodId, body)
+        if (!updated) return send(res, 404, { error: 'Product not found.' })
+        logAdminAction({
+          adminId: admin.id,
+          adminName: admin.name,
+          action: 'update_product',
+          targetType: 'product',
+          targetId: updated.id,
+          details: { name: updated.name, price: updated.price, status: updated.status },
+        })
+        return send(res, 200, { product: updated, message: 'Product updated in Supabase successfully.' })
+      } catch (err: any) {
+        return send(res, 400, { error: err.message || 'Failed to update product in Supabase.' })
+      }
     }
 
     if (req.method === 'DELETE') {
-      const deleted = deleteProduct(prodId)
-      if (!deleted) return send(res, 404, { error: 'Product not found.' })
-      logAdminAction({
-        adminId: admin.id,
-        adminName: admin.name,
-        action: 'delete_product',
-        targetType: 'product',
-        targetId: prodId,
-      })
-      return send(res, 200, { ok: true, message: 'Product removed from catalog.' })
+      try {
+        const deleted = await deleteProduct(prodId)
+        if (!deleted) return send(res, 404, { error: 'Product not found.' })
+        logAdminAction({
+          adminId: admin.id,
+          adminName: admin.name,
+          action: 'delete_product',
+          targetType: 'product',
+          targetId: prodId,
+        })
+        return send(res, 200, { ok: true, message: 'Product removed from catalog.' })
+      } catch (err: any) {
+        return send(res, 400, { error: err.message || 'Failed to delete product from Supabase.' })
+      }
     }
   }
 
   // 5. CATEGORIES
   if (req.method === 'GET' && url === '/api/admin/categories') {
-    return send(res, 200, { categories: readCategories() })
+    try {
+      const categories = await readCategories()
+      return send(res, 200, { categories })
+    } catch (err: any) {
+      return send(res, 500, { error: err.message || 'Failed to fetch categories.' })
+    }
   }
 
   if (req.method === 'POST' && url === '/api/admin/categories') {
-    const created = createCategory(body)
-    return send(res, 201, { category: created })
+    try {
+      const created = await createCategory(body)
+      return send(res, 201, { category: created })
+    } catch (err: any) {
+      return send(res, 400, { error: err.message || 'Failed to create category.' })
+    }
   }
 
   const catMatch = url.match(/^\/api\/admin\/categories\/([^/]+)$/)
   if (catMatch) {
     const catId = catMatch[1]
     if (req.method === 'PUT') {
-      const updated = updateCategory(catId, body)
-      if (!updated) return send(res, 404, { error: 'Category not found.' })
-      return send(res, 200, { category: updated })
+      try {
+        const updated = await updateCategory(catId, body)
+        if (!updated) return send(res, 404, { error: 'Category not found.' })
+        return send(res, 200, { category: updated })
+      } catch (err: any) {
+        return send(res, 400, { error: err.message || 'Failed to update category.' })
+      }
     }
     if (req.method === 'DELETE') {
-      const ok = deleteCategory(catId)
-      if (!ok) return send(res, 404, { error: 'Category not found.' })
-      return send(res, 200, { ok: true })
+      try {
+        const ok = await deleteCategory(catId)
+        if (!ok) return send(res, 404, { error: 'Category not found.' })
+        return send(res, 200, { ok: true })
+      } catch (err: any) {
+        return send(res, 400, { error: err.message || 'Failed to delete category.' })
+      }
     }
   }
 
   // 6. INVENTORY
   if (req.method === 'GET' && url === '/api/admin/inventory') {
-    const products = readProducts()
+    const products = await readProducts()
     const inventory = products.map((p) => ({
       id: p.id,
       name: p.name,
