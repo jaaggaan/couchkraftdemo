@@ -10,21 +10,6 @@ type ProductCardProps = {
   showPrice?: boolean
 }
 
-function PrevChevron({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M15 18l-6-6 6-6" />
-    </svg>
-  )
-}
-
-function NextChevron({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M9 18l6-6-6-6" />
-    </svg>
-  )
-}
 
 function useSwipeGallery() {
   const [swipe, setSwipe] = useState(() =>
@@ -73,13 +58,18 @@ export function ProductCard({ product, showPrice = true }: ProductCardProps) {
     }
   }
 
-  const prevImage = (e: React.MouseEvent) => {
-    goToIndex(index - 1, e)
-  }
-
-  const nextImage = (e: React.MouseEvent) => {
-    goToIndex(index + 1, e)
-  }
+  useEffect(() => {
+    const handleResize = () => {
+      if (sliderRef.current) {
+        const width = sliderRef.current.clientWidth
+        if (width) {
+          sliderRef.current.scrollTo({ left: index * width })
+        }
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [index])
 
   const syncSwipeIndex = () => {
     const node = sliderRef.current
@@ -132,41 +122,22 @@ export function ProductCard({ product, showPrice = true }: ProductCardProps) {
         )}
 
         {hasMultiple && (
-          <>
-            <button
-              type="button"
-              className="product-card-arrow is-prev"
-              aria-label={`Previous image for ${product.name}`}
-              onClick={prevImage}
-            >
-              <PrevChevron />
-            </button>
-            <button
-              type="button"
-              className="product-card-arrow is-next"
-              aria-label={`Next image for ${product.name}`}
-              onClick={nextImage}
-            >
-              <NextChevron />
-            </button>
-
-            <div className="slide-dots" role="tablist" aria-label={`Images for ${product.name}`}>
-              {images.map((src, imageIndex) => {
-                const active = imageIndex === index
-                return (
-                  <button
-                    key={`${src}-${imageIndex}`}
-                    type="button"
-                    role="tab"
-                    className={`slide-dot${active ? ' is-on' : ''}`}
-                    aria-label={`View image ${imageIndex + 1} of ${images.length}`}
-                    aria-selected={active}
-                    onClick={(e) => goToIndex(imageIndex, e)}
-                  />
-                )
-              })}
-            </div>
-          </>
+          <div className="slide-dots" role="tablist" aria-label={`Images for ${product.name}`}>
+            {images.map((src, imageIndex) => {
+              const active = imageIndex === index
+              return (
+                <button
+                  key={`${src}-${imageIndex}`}
+                  type="button"
+                  role="tab"
+                  className={`slide-dot${active ? ' is-on' : ''}`}
+                  aria-label={`View image ${imageIndex + 1} of ${images.length}`}
+                  aria-selected={active}
+                  onClick={(e) => goToIndex(imageIndex, e)}
+                />
+              )
+            })}
+          </div>
         )}
 
         <button
