@@ -412,7 +412,7 @@ function CustomizationEditor({
           </div>
 
           {/* 5. FINISHES & MATERIALS */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div className="admin-grid-2">
             {/* Finishes */}
             <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -627,7 +627,7 @@ export function ProductEditPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24, alignItems: 'start' }}>
+      <div className="admin-two-col">
         {/* LEFT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* General Info */}
@@ -639,11 +639,11 @@ export function ProductEditPage() {
             <Field label="Product Title">
               <input value={form.name} onChange={e => set('name', e.target.value)} style={inputStyle} />
             </Field>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="admin-grid-2">
               <Field label="SKU"><input value={form.sku} onChange={e => set('sku', e.target.value)} style={inputStyle} /></Field>
               <Field label="URL Slug"><input value={form.slug} onChange={e => set('slug', e.target.value)} style={inputStyle} /></Field>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="admin-grid-2">
               <Field label="Primary Category">
                 <select value={form.category} onChange={e => set('category', e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
                   <option>Living Room &gt; Sofas &amp; Couches</option>
@@ -698,7 +698,7 @@ export function ProductEditPage() {
               <Field label="Seating Capacity"><input value={form.seatingCapacity} onChange={e => set('seatingCapacity', e.target.value)} style={inputStyle} /></Field>
               <Field label="Warranty"><input value={form.warranty} onChange={e => set('warranty', e.target.value)} style={inputStyle} /></Field>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="admin-grid-2">
               <Field label="Structural Wood"><input value={form.structuralWood} onChange={e => set('structuralWood', e.target.value)} style={inputStyle} /></Field>
               <Field label="Foam & Upholstery"><input value={form.foamUpholstery} onChange={e => set('foamUpholstery', e.target.value)} style={inputStyle} /></Field>
             </div>

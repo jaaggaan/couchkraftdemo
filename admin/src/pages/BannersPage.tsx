@@ -209,13 +209,14 @@ export function BannersPage() {
           {banners.map((b, index) => (
             <div
               key={b.id}
+              className="banner-item-grid"
               style={{
                 background: '#fff',
                 borderRadius: 12,
                 overflow: 'hidden',
                 boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
                 display: 'grid',
-                gridTemplateColumns: '280px 1fr auto',
+                
                 alignItems: 'stretch',
                 border: b.active ? '1px solid var(--border-subtle)' : '1px dashed #d8d0c5',
                 opacity: b.active ? 1 : 0.8,

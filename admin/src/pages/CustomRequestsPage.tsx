@@ -112,7 +112,7 @@ export function CustomRequestsPage() {
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Custom furniture enquiries submitted via storefront WhatsApp modals will appear here.</p>
         </div>
       ) : (
-        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+        <div className="table-responsive" style={{ background: '#fff', borderRadius: 12, overflowX: 'auto', boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'var(--surface-cream)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>

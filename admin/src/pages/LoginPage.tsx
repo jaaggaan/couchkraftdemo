@@ -23,7 +23,7 @@ export function LoginPage({ onLogin }: { onLogin: (admin: any, token: string) =>
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, var(--canvas-ivory), var(--surface-container))' }}>
-      <form onSubmit={handleSubmit} style={{ width: 400, background: '#fff', borderRadius: 16, padding: 40, boxShadow: '0 8px 40px rgba(0,0,0,0.08)' }}>
+      <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 400, margin: 16, background: '#fff', borderRadius: 16, padding: 'clamp(24px, 5vw, 40px)', boxShadow: '0 8px 40px rgba(0,0,0,0.08)' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--primary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: 'Playfair Display', fontSize: 28, fontWeight: 700, marginBottom: 16 }}>C</div>
           <h1 style={{ fontFamily: 'Playfair Display', fontWeight: 700, fontSize: 24, color: 'var(--primary)', letterSpacing: '-0.01em' }}>COUCHKRAFT</h1>

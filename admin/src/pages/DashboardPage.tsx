@@ -61,7 +61,7 @@ export function DashboardPage() {
       </div>
 
       {/* RECENT ORDERS TABLE */}
-      <div style={{ background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
+      <div style={{ background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 1px 6px rgba(0,0,0,0.04)', overflowX: 'auto' }} className="table-responsive">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <h2 style={{ fontFamily: 'Playfair Display', fontSize: 18, fontWeight: 600 }}>Recent Orders</h2>
           <button onClick={() => navigate('/orders')} style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', border: 'none', background: 'none', cursor: 'pointer' }}>View All →</button>

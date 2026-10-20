@@ -8,7 +8,7 @@ export function CustomersPage() {
   return (
     <div>
       <h1 style={{ fontFamily: 'Playfair Display', fontSize: 24, fontWeight: 600, marginBottom: 20 }}>Customers</h1>
-      <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
+      <div className="table-responsive" style={{ background: '#fff', borderRadius: 12, overflowX: 'auto', boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border-subtle)' }}>
