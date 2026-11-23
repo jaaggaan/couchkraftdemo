@@ -36,3 +36,4 @@ data/custom_requests.json
 admin/dist
 .provision-demo-customer.mjs
 .youpi-pg-ref/
+.env*

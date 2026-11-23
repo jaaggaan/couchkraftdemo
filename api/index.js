@@ -12,18 +12,34 @@ function dataDirectory() {
 
 // server/supabase-client.ts
 import { createClient } from "@supabase/supabase-js";
-var SUPABASE_URL = process.env.SUPABASE_URL?.trim();
-var SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-if (!SUPABASE_URL) {
-  throw new Error("SUPABASE_URL is required for server-side database access.");
+var client;
+function requireSupabaseConfig() {
+  const url = process.env.SUPABASE_URL?.trim();
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!url) {
+    throw new Error("SUPABASE_URL is required for server-side database access.");
+  }
+  if (!key) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for protected server-side database mutations.");
+  }
+  return { url, key };
 }
-if (!SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for protected server-side database mutations.");
+function getSupabase() {
+  if (!client) {
+    const { url, key } = requireSupabaseConfig();
+    client = createClient(url, key, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    });
+  }
+  return client;
 }
-var supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
+var supabase = new Proxy({}, {
+  get(_target, prop, receiver) {
+    const value = getSupabase()[prop];
+    return typeof value === "function" ? value.bind(getSupabase()) : Reflect.get(getSupabase(), prop, receiver);
   }
 });
 
