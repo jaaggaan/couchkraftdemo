@@ -149,62 +149,38 @@ export function ShopPage() {
           </select>
         </label>
       </div>
-            {/* BESPOKE CUSTOM FURNITURE ENTRY POINT */}
-      <div style={{
-        margin: '24px 0', padding: '24px 28px', borderRadius: 16,
-        background: 'linear-gradient(135deg, rgba(253,251,247,0.95), rgba(245,240,235,0.95))',
-        border: '1px solid rgba(131,80,34,0.18)', display: 'flex',
-        alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16,
-      }}>
-        <div style={{ maxWidth: 560 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: '#835022', textTransform: 'uppercase' }}>
-            Atelier Commissions
-          </div>
-          <h2 style={{ fontFamily: 'Playfair Display', fontSize: 20, fontWeight: 600, color: '#1c1917', margin: '4px 0 6px' }}>
-            Need Bespoke Dimensions or Unique Upholstery?
-          </h2>
-          <p style={{ color: '#78716c', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
-            Every home is singular. Connect directly with our master craftsmen on WhatsApp to commission a custom-made sofa, lounge chair, or dining piece tailored to your architectural blueprints.
-          </p>
+      <ProductGrid items={items} />
+
+      <section className="shop-commission-cta" aria-labelledby="shop-commission-title">
+        <div className="shop-commission-cta__copy">
+          <h2 id="shop-commission-title">Need custom furniture?</h2>
+          <p>Share what you want — we reply on WhatsApp with a price.</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setCustomModalOpen(true)}
-            style={{ whiteSpace: 'nowrap' }}
-          >
-            Custom Commission Form
+        <div className="shop-commission-cta__actions">
+          <button type="button" className="btn shop-commission-cta__btn" onClick={() => setCustomModalOpen(true)}>
+            Get a quote
           </button>
           <a
+            className="shop-commission-cta__wa"
             href={getWhatsAppUrl(
               COUCHKRAFT_WHATSAPP_PHONE,
               buildCustomFurnitureWhatsAppMessage({
-                productName: 'Custom Silhouette / Architectural Commission',
+                productName: 'Custom furniture',
                 productUrl: typeof window !== 'undefined' ? `${window.location.origin}/shop` : 'https://couchkraft.in/shop',
-              })
+              }),
             )}
             target="_blank"
             rel="noreferrer"
-            style={{
-              padding: '12px 20px', borderRadius: 8, background: '#38312b', color: '#fff',
-              fontSize: 14, fontWeight: 600, textDecoration: 'none', display: 'inline-flex',
-              alignItems: 'center', gap: 6, boxShadow: '0 2px 8px rgba(41,36,31,0.12)',
-              whiteSpace: 'nowrap',
-            }}
+            aria-label="Chat on WhatsApp"
           >
-            <span>💬</span> Direct WhatsApp Chat
+            WhatsApp
           </a>
         </div>
-      </div>
+      </section>
 
-      <CustomRequestModal
-        isOpen={customModalOpen}
-        onClose={() => setCustomModalOpen(false)}
-      />
+      <CustomRequestModal isOpen={customModalOpen} onClose={() => setCustomModalOpen(false)} />
 
-      <ProductGrid items={items} />
-      <div style={{ height: 64 }} />
+      <div style={{ height: 48 }} />
     </main>
   )
 }

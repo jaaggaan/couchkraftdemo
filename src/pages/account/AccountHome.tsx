@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { authApi } from '../../lib/auth-api'
+import { OrderTrackingFeed } from '../../components/OrderTrackingFeed'
+import { PersonalCouponsCard } from '../../components/PersonalCouponsCard'
 
 export function AccountHome() {
   const { user, refresh } = useAuth()
@@ -24,6 +26,8 @@ export function AccountHome() {
 
   return (
     <div>
+      <OrderTrackingFeed title="Your tracking feed" />
+      <PersonalCouponsCard />
       <h2>Profile</h2>
 
       {editing ? (

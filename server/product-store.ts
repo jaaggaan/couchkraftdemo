@@ -1,3 +1,4 @@
+import { normalizeInventoryFields, validateInventoryPatch } from './inventory-rules.ts'
 import { supabase } from './supabase-client.ts'
 import type { Product as BaseProduct } from '../src/data/products.ts'
 
@@ -41,7 +42,7 @@ export type Product = BaseProduct & {
   allowComUpholstery: boolean
   metaTitle: string
   metaDescription: string
-  status: 'draft' | 'published'
+  status: 'draft' | 'published' | 'archived'
   unitsSold: number
   revenue: number
   createdAt: string
@@ -70,6 +71,10 @@ export function resolveCategoryId(categoryName: string, explicitId?: string): st
 }
 
 function toProductDbRow(p: any): Record<string, any> {
+  const inventoryError = validateInventoryPatch(p)
+  if (inventoryError) throw new Error(inventoryError)
+  const inventory = normalizeInventoryFields(p)
+
   const name = String(p.name || 'Untitled Piece').trim()
   const slug = (p.slug || name || 'product')
     .toLowerCase()
@@ -115,10 +120,10 @@ function toProductDbRow(p: any): Record<string, any> {
     warranty: p.warranty || '5 Years Structural Frame',
     structural_wood: p.structuralWood ?? p.structural_wood ?? 'Kiln-dried Teak & Sheesham Hardwood',
     foam_upholstery: p.foamUpholstery ?? p.foam_upholstery ?? '38-Density Ultra-Cell Foam + Belgian Linen Blend',
-    ready_to_ship_stock: Number(p.readyToShipStock ?? p.ready_to_ship_stock) || 0,
-    low_stock_threshold: Number(p.lowStockThreshold ?? p.low_stock_threshold) || 2,
-    made_to_order: p.madeToOrder ?? p.made_to_order ?? true,
-    lead_time_weeks: Number(p.leadTimeWeeks ?? p.lead_time_weeks) || 3,
+    ready_to_ship_stock: inventory.ready_to_ship_stock,
+    low_stock_threshold: inventory.low_stock_threshold,
+    made_to_order: inventory.made_to_order,
+    lead_time_weeks: inventory.lead_time_weeks,
     customization_enabled: p.customizationEnabled ?? p.customization_enabled ?? true,
     customization_tolerance_cm: Number(p.customizationToleranceCm ?? p.customization_tolerance_cm) || 15,
     allow_com_upholstery: p.allowComUpholstery ?? p.allow_com_upholstery ?? true,
@@ -127,6 +132,15 @@ function toProductDbRow(p: any): Record<string, any> {
     status: p.status || 'published',
     gst_slab: p.gstSlab ?? p.gst_slab ?? '18% GST (Standard Furniture)',
     hsn_code: p.hsnCode ?? p.hsn_code ?? '9403 6000',
+    festive_discount_percent: (() => {
+      const n = Math.round(Number(p.festiveDiscountPercent ?? p.festive_discount_percent) || 0)
+      return Math.min(100, Math.max(0, n))
+    })(),
+    extra_discount_type: (() => {
+      const n = Math.round(Number(p.festiveDiscountPercent ?? p.festive_discount_percent) || 0)
+      if (n <= 0) return null
+      return p.extraDiscountType === 'standard' || p.extra_discount_type === 'standard' ? 'standard' : 'festive'
+    })(),
   }
 }
 
@@ -141,6 +155,13 @@ function fromProductDbRow(row: any): Product {
     sku: row.sku || '',
     price: Number(row.price) || 0,
     compareAt: Number(row.compare_at ?? row.compareAt) || 0,
+    festiveDiscountPercent: Number(row.festive_discount_percent ?? row.festiveDiscountPercent) || 0,
+    extraDiscountType:
+      Number(row.festive_discount_percent ?? row.festiveDiscountPercent) > 0
+        ? row.extra_discount_type === 'standard' || row.extraDiscountType === 'standard'
+          ? 'standard'
+          : 'festive'
+        : undefined,
     gstSlab: row.gst_slab ?? row.gstSlab ?? '18% GST (Standard Furniture)',
     hsnCode: row.hsn_code ?? row.hsnCode ?? '9403 6000',
     description: row.description || '',
@@ -255,6 +276,50 @@ export async function updateProduct(id: string, updates: Partial<Product>): Prom
   }
 
   return fromProductDbRow(data[0])
+}
+
+const BESPOKE_PLACEHOLDER_ID = 'prod_bespoke_commission'
+
+export async function setFestiveDiscountForProducts(input: {
+  percent: number | null
+  scope: 'one' | 'all'
+  productId?: string
+  discountType?: 'festive' | 'standard'
+}): Promise<{ updatedCount: number }> {
+  const clearing = input.percent == null
+  const patch: Record<string, unknown> = {
+    festive_discount_percent: clearing
+      ? 0
+      : Math.min(100, Math.max(1, Math.round(input.percent as number))),
+    extra_discount_type: clearing
+      ? null
+      : input.discountType === 'standard'
+        ? 'standard'
+        : 'festive',
+    updated_at: new Date().toISOString(),
+  }
+
+  if (input.scope === 'one') {
+    const productId = String(input.productId || '').trim()
+    if (!productId) throw new Error('Product id is required for single-product discount.')
+    const { data, error } = await supabase
+      .from('products')
+      .update(patch)
+      .eq('id', productId)
+      .neq('id', BESPOKE_PLACEHOLDER_ID)
+      .select('id')
+    if (error) throw new Error(error.message)
+    return { updatedCount: data?.length ?? 0 }
+  }
+
+  const { data, error } = await supabase
+    .from('products')
+    .update(patch)
+    .neq('status', 'archived')
+    .neq('id', BESPOKE_PLACEHOLDER_ID)
+    .select('id')
+  if (error) throw new Error(error.message)
+  return { updatedCount: data?.length ?? 0 }
 }
 
 export async function deleteProduct(id: string): Promise<boolean> {

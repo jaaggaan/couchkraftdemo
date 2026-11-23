@@ -1,4 +1,18 @@
 export const COUCHKRAFT_WHATSAPP_PHONE = '916360704340'
+export const COUCHKRAFT_BRAND_NAME = 'CouchKraft'
+
+export function buildStoreEnquiryWhatsAppMessage(clientName?: string) {
+  const who = clientName?.trim() ? `This is ${clientName.trim()}. ` : ''
+  return [
+    'Hello CouchKraft,',
+    '',
+    `${who}I would like to enquire about your handcrafted furniture.`,
+    '',
+    'Please share catalogue options, pricing and delivery timelines.',
+    '',
+    'Thank you!',
+  ].join('\n')
+}
 
 export function buildCustomFurnitureWhatsAppMessage(options: {
   productName?: string
@@ -13,27 +27,33 @@ export function buildCustomFurnitureWhatsAppMessage(options: {
   clientName?: string
   clientPhone?: string
 }) {
-  const lines = [
-    'Hello CouchKraft Atelier Concierge,',
-    '',
-    options.productName
-      ? `I would like to enquire about a bespoke custom-made furniture piece based on: *${options.productName}*`
-      : 'I would like to enquire about commissioning a bespoke custom-made furniture piece.',
-    options.productUrl ? `*Piece Link:* ${options.productUrl}` : '',
-    '',
-    'Here are my requested specifications:',
-    `- Seating Capacity: ${options.seating || '[e.g. 2-Seater / 3-Seater / 4-Seater / L-Shaped]' }`,
-    `- Desired Dimensions: ${options.dimensions || '[e.g. Width: ___cm × Depth: ___cm × Height: ___cm]' }`,
-    `- Preferred Fabric / Upholstery: ${options.fabric || options.material || '[e.g. Belgian Linen / Velvet / Bouclé / Leather]' }`,
-    `- Preferred Color / Tone: ${options.color || '[e.g. Warm Ivory / Terracotta / Dark Walnut]' }`,
-    `- Structural Material: ${options.material ? options.material : '[e.g. Teak Hardwood / Sheesham / Oak]' }`,
-    `- Target Budget Range: ${options.budget || '[e.g. ₹50,000 – ₹1,50,000]' }`,
-    options.notes ? `- Specific Requirements: ${options.notes}` : '- Specific Requirements: [e.g. Left chaise orientation, firm cushion, brass legs]',
-    '',
-    options.clientName ? `*Client Name:* ${options.clientName} ${options.clientPhone ? `(${options.clientPhone})` : ''}` : '',
-    '',
-    'Could you please advise on bespoke estimate, fabric swatches, and crafting lead time?',
-  ].filter(Boolean)
+  const lines: string[] = ['Hi CouchKraft,', '', 'I need a custom quote.', '']
+
+  const piece = options.productName?.trim()
+  if (piece) lines.push(`Item: ${piece}`)
+
+  const link = options.productUrl?.trim()
+  if (link) lines.push(`Link: ${link}`)
+
+  const sizeParts = [options.seating?.trim(), options.dimensions?.trim()].filter(Boolean)
+  if (sizeParts.length) lines.push(`Size: ${sizeParts.join(' — ')}`)
+
+  const look = [options.material, options.fabric, options.color]
+    .map((s) => s?.trim())
+    .filter(Boolean)
+  if (look.length) lines.push(`Material & colour: ${[...new Set(look)].join(', ')}`)
+
+  if (options.budget?.trim()) lines.push(`Budget: ${options.budget.trim()}`)
+  if (options.notes?.trim()) lines.push(`Extra details: ${options.notes.trim()}`)
+
+  const contact = [options.clientName?.trim(), options.clientPhone?.trim()].filter(Boolean)
+  if (contact.length) {
+    lines.push('')
+    lines.push(`Contact: ${contact.join(' · ')}`)
+  }
+
+  lines.push('')
+  lines.push('Please share price and delivery time. Thank you!')
 
   return lines.join('\n')
 }

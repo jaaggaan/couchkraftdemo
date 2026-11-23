@@ -16,9 +16,20 @@ type CustomRequest = {
   color?: string
   budget?: string
   notes?: string
+  referenceImages?: string[]
   status: 'new' | 'under_review' | 'quoted' | 'approved' | 'archived'
   adminNotes?: string
+  quoteAmount?: number | null
+  paymentStatus?: 'none' | 'awaiting' | 'paid'
+  linkedOrderId?: string | null
   createdAt: string
+}
+
+function referenceImagesFor(req: CustomRequest): string[] {
+  if (Array.isArray(req.referenceImages) && req.referenceImages.length) return req.referenceImages
+  const dims = req.dimensions as { referenceImages?: string[]; raw?: string } | undefined
+  if (Array.isArray(dims?.referenceImages)) return dims.referenceImages
+  return []
 }
 
 const statusColors: Record<string, { bg: string; color: string }> = {
@@ -36,6 +47,7 @@ export function CustomRequestsPage() {
   const [selectedReq, setSelectedReq] = useState<CustomRequest | null>(null)
   const [updating, setUpdating] = useState(false)
   const [adminNoteText, setAdminNoteText] = useState('')
+  const [quoteAmountText, setQuoteAmountText] = useState('')
 
   const fetchRequests = () => {
     setLoading(true)
@@ -51,10 +63,19 @@ export function CustomRequestsPage() {
   const handleUpdateStatus = async (id: string, nextStatus: any) => {
     setUpdating(true)
     try {
-      await adminApi.updateCustomRequest(id, { status: nextStatus, adminNotes: adminNoteText })
-      setRequests((list) => list.map((r) => (r.id === id ? { ...r, status: nextStatus, adminNotes: adminNoteText } : r)))
+      const quoteParsed =
+        quoteAmountText.trim() === '' ? null : Number(quoteAmountText.replace(/[^\d.]/g, ''))
+      const quoteAmount = quoteParsed != null && Number.isFinite(quoteParsed) ? quoteParsed : null
+      await adminApi.updateCustomRequest(id, { status: nextStatus, adminNotes: adminNoteText, quoteAmount })
+      setRequests((list) =>
+        list.map((r) =>
+          r.id === id ? { ...r, status: nextStatus, adminNotes: adminNoteText, quoteAmount } : r,
+        ),
+      )
       if (selectedReq?.id === id) {
-        setSelectedReq((prev) => (prev ? { ...prev, status: nextStatus, adminNotes: adminNoteText } : null))
+        setSelectedReq((prev) =>
+          prev ? { ...prev, status: nextStatus, adminNotes: adminNoteText, quoteAmount } : null,
+        )
       }
     } finally {
       setUpdating(false)
@@ -109,7 +130,7 @@ export function CustomRequestsPage() {
         <div style={{ background: '#fff', borderRadius: 12, padding: 48, textAlign: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
           <span className="material-symbols-outlined" style={{ fontSize: 44, color: 'var(--text-muted)', marginBottom: 12 }}>draw</span>
           <h3 style={{ fontFamily: 'Playfair Display', fontSize: 18, fontWeight: 600 }}>No enquiries found</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Custom furniture enquiries submitted via storefront WhatsApp modals will appear here.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Custom furniture enquiries from the storefront form will appear here (with reference photos when uploaded).</p>
         </div>
       ) : (
         <div className="table-responsive" style={{ background: '#fff', borderRadius: 12, overflowX: 'auto', boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
@@ -121,6 +142,7 @@ export function CustomRequestsPage() {
                 <th style={{ padding: '14px 16px' }}>Piece Reference</th>
                 <th style={{ padding: '14px 16px' }}>Specifications</th>
                 <th style={{ padding: '14px 16px' }}>Target Budget</th>
+                <th style={{ padding: '14px 16px' }}>Quote / Pay</th>
                 <th style={{ padding: '14px 16px' }}>Status</th>
                 <th style={{ padding: '14px 16px', textAlign: 'right' }}>Actions</th>
               </tr>
@@ -130,7 +152,7 @@ export function CustomRequestsPage() {
                 const sc = statusColors[r.status] || { bg: '#f3f4f6', color: '#4b5563' }
                 const cleanPhone = r.customerPhone.replace(/[^0-9]/g, '')
                 return (
-                  <tr key={r.id} style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer' }} onClick={() => { setSelectedReq(r); setAdminNoteText(r.adminNotes || '') }}>
+                  <tr key={r.id} style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer' }} onClick={() => { setSelectedReq(r); setAdminNoteText(r.adminNotes || ''); setQuoteAmountText(r.quoteAmount != null ? String(r.quoteAmount) : '') }}>
                     <td style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--primary)' }}>{r.id}</td>
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.customerName}</div>
@@ -154,6 +176,26 @@ export function CustomRequestsPage() {
                       )}
                     </td>
                     <td style={{ padding: '14px 16px', fontWeight: 600 }}>{r.budget || 'Undisclosed'}</td>
+                    <td style={{ padding: '14px 16px', fontSize: 12 }}>
+                      {r.quoteAmount != null && Number(r.quoteAmount) > 0 ? (
+                        <div style={{ fontWeight: 700 }}>₹{Number(r.quoteAmount).toLocaleString('en-IN')}</div>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>—</span>
+                      )}
+                      {r.status === 'approved' ? (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                            color: r.paymentStatus === 'paid' ? '#166534' : '#92400e',
+                          }}
+                        >
+                          {r.paymentStatus === 'paid' ? 'Paid' : r.paymentStatus === 'awaiting' ? 'Awaiting pay' : 'Not paid'}
+                        </div>
+                      ) : null}
+                    </td>
                     <td style={{ padding: '14px 16px' }}>
                       <span style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: sc.bg, color: sc.color, textTransform: 'capitalize' }}>
                         {r.status.replace('_', ' ')}
@@ -211,6 +253,40 @@ export function CustomRequestsPage() {
             </div>
 
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ background: 'var(--surface-cream)', padding: 14, borderRadius: 8 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Final commission amount (INR)
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={quoteAmountText}
+                  onChange={(e) => setQuoteAmountText(e.target.value)}
+                  placeholder="e.g. 125000"
+                  style={{ width: '100%', height: 38, borderRadius: 6, border: '1px solid var(--border-subtle)', padding: '0 10px', fontSize: 14, fontWeight: 600 }}
+                />
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                  Set when approving — unlocks Pay commission on the customer account.
+                </p>
+                {selectedReq.paymentStatus ? (
+                  <p style={{ fontSize: 12, marginTop: 10, fontWeight: 600 }}>
+                    Payment:{' '}
+                    <span style={{ color: selectedReq.paymentStatus === 'paid' ? '#166534' : '#92400e' }}>
+                      {selectedReq.paymentStatus === 'paid'
+                        ? 'Paid'
+                        : selectedReq.paymentStatus === 'awaiting'
+                          ? 'Awaiting customer payment'
+                          : 'Not started'}
+                    </span>
+                    {selectedReq.linkedOrderId ? (
+                      <span style={{ display: 'block', fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}>
+                        Order ref: {selectedReq.linkedOrderId}
+                      </span>
+                    ) : null}
+                  </p>
+                ) : null}
+              </div>
+
               {/* STATUS SELECTOR */}
               <div style={{ background: 'var(--surface-cream)', padding: 14, borderRadius: 8 }}>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
@@ -253,7 +329,11 @@ export function CustomRequestsPage() {
               {/* SPECS */}
               <div style={{ background: 'var(--surface-cream)', padding: 14, borderRadius: 8 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Requested Specifications</div>
-                {selectedReq.seatingCapacity && <div style={{ fontSize: 13, marginBottom: 4 }}><strong>Seating:</strong> {selectedReq.seatingCapacity}</div>}
+                {selectedReq.seatingCapacity && <div style={{ fontSize: 13, marginBottom: 4 }}><strong>Seating / size:</strong> {selectedReq.seatingCapacity}</div>}
+                {(selectedReq.dimensions as { raw?: string } | undefined)?.raw &&
+                  !selectedReq.seatingCapacity && (
+                    <div style={{ fontSize: 13, marginBottom: 4 }}><strong>Size:</strong> {(selectedReq.dimensions as { raw: string }).raw}</div>
+                  )}
                 {selectedReq.dimensions?.width && (
                   <div style={{ fontSize: 13, marginBottom: 4 }}>
                     <strong>Dimensions:</strong> {selectedReq.dimensions.width} W × {selectedReq.dimensions.depth} D × {selectedReq.dimensions.height} H ({selectedReq.dimensions.unit || 'cm'})
@@ -269,6 +349,21 @@ export function CustomRequestsPage() {
                   </div>
                 )}
               </div>
+
+              {referenceImagesFor(selectedReq).length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
+                    Client reference photos
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {referenceImagesFor(selectedReq).map((src, i) => (
+                      <a key={i} href={src} target="_blank" rel="noreferrer">
+                        <img src={src} alt="" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border-subtle)' }} />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* ADMIN NOTES */}
               <div>

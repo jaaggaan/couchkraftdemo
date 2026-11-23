@@ -45,7 +45,8 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getProductBySlug } from '../data/products'
 import { useStore } from '../context/StoreContext'
-import { formatPrice } from '../utils/format'
+import { effectiveSellingPrice } from '../lib/product-pricing'
+import { ProductPriceWithOffer } from '../components/ProductExtraDiscount'
 import { ProductGrid } from '../components/ProductCard'
 
 export function ProductPage() {
@@ -58,7 +59,10 @@ export function ProductPage() {
   const [note, setNote] = useState('')
   const [customRequestOpen, setCustomRequestOpen] = useState(false)
   const [selectedCustomization, setSelectedCustomization] = useState<SelectedCustomization | null>(null)
-  const [configuredPrice, setConfiguredPrice] = useState<number>(product?.price || 0)
+  const baseListPrice = product
+    ? effectiveSellingPrice(product.price, product.festiveDiscountPercent)
+    : 0
+  const [configuredPrice, setConfiguredPrice] = useState<number>(baseListPrice)
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
@@ -67,7 +71,9 @@ export function ProductPage() {
     setImage(0)
     setNote('')
     setSelectedCustomization(null)
-    setConfiguredPrice(product?.price || 0)
+    setConfiguredPrice(
+      product ? effectiveSellingPrice(product.price, product.festiveDiscountPercent) : 0,
+    )
   }, [product, slug])
 
   if (!product) {
@@ -103,10 +109,13 @@ export function ProductPage() {
         <div className="pdp-info">
           <h1>{product.name}</h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '8px 0 16px' }}>
-            <p className="pdp-price" style={{ margin: 0 }}>
-              {product.compareAt ? <span className="price-was">{formatPrice(product.compareAt)}</span> : null}
-              {formatPrice(configuredPrice > 0 ? configuredPrice : product.price)}
-            </p>
+            <div className="pdp-price">
+              <ProductPriceWithOffer
+                product={product}
+                amount={configuredPrice > 0 ? configuredPrice : baseListPrice}
+                layout="block"
+              />
+            </div>
             {product.madeToOrder ? (
               <span style={{ padding: '4px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600, background: 'rgba(131,80,34,0.1)', color: '#835022' }}>
                 Made to Order · {product.leadTimeWeeks || 3} weeks lead time
@@ -185,7 +194,7 @@ export function ProductPage() {
               </button>
             </div>
 
-            {/* Atelier & Concierge Actions: Custom-Made Commission + Chat on WhatsApp */}
+            {/* Custom quote + WhatsApp */}
             <div className="pdp-secondary-row">
               <button
                 type="button"
@@ -193,7 +202,7 @@ export function ProductPage() {
                 onClick={() => setCustomRequestOpen(true)}
               >
                 <CommissionIcon />
-                <span>Custom Commission</span>
+                <span>Custom quote</span>
               </button>
 
               <a
@@ -215,7 +224,7 @@ export function ProductPage() {
                 className="pdp-btn pdp-btn-whatsapp"
               >
                 <WhatsAppIcon />
-                <span>Chat on WhatsApp</span>
+                <span>WhatsApp</span>
               </a>
             </div>
           </div>

@@ -13,6 +13,7 @@ const titles: Record<string, string> = {
   '/wishlist': 'Saved pieces — CouchKraft',
   '/account': 'Account — CouchKraft',
   '/account/orders': 'My orders — CouchKraft',
+  '/account/custom-requests': 'My custom requests — CouchKraft',
   '/account/track': 'Track order — CouchKraft',
   '/account/addresses': 'Addresses — CouchKraft',
   '/privacy': 'Privacy — CouchKraft',

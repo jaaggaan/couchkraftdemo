@@ -6,6 +6,9 @@ import { lifestyle, spaces } from '../data/site'
 import { ProductGrid } from '../components/ProductCard'
 import { ArrowIcon } from '../components/Icons'
 import { HeroSlider } from '../components/HeroSlider'
+import { ReviewsMarquee } from '../components/ReviewsMarquee'
+import { CustomizeCtaSection } from '../components/CustomizeCtaSection'
+import { CustomRequestModal } from '../components/CustomRequestModal'
 
 export function HomePage() {
   const [tab, setTab] = useState<CollectionTab>('bestsellers')
@@ -14,6 +17,7 @@ export function HomePage() {
   const overlayProduct = liveProducts.find((product) => product.slug === 'theo-oak-chair') ?? liveProducts[0]
   const [email, setEmail] = useState('')
   const [note, setNote] = useState('')
+  const [customOpen, setCustomOpen] = useState(false)
 
   return (
     <main id="main">
@@ -40,6 +44,8 @@ export function HomePage() {
         <ProductGrid items={items} showPrice={false} />
       </section>
 
+      <ReviewsMarquee />
+
       <section className="section page-wrap lifestyle">
         <div className="lifestyle-photo">
           <img src={lifestyle.kitchen} alt="A warm oak kitchen and dining room with natural daylight" width={1600} height={1100} />
@@ -59,6 +65,10 @@ export function HomePage() {
           </Link>
         </div>
       </section>
+
+      <CustomizeCtaSection onOpenRequest={() => setCustomOpen(true)} />
+
+      <CustomRequestModal isOpen={customOpen} onClose={() => setCustomOpen(false)} />
 
       <section className="section page-wrap">
         <div className="section-heading">

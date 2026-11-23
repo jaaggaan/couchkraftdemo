@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { dataDirectory } from './data-path.ts'
@@ -17,6 +18,14 @@ export type Coupon = {
   description: string
   createdAt: string
   updatedAt: string
+  /** Personal offer — only this customer can redeem */
+  personal?: boolean
+  customerId?: string
+  customerName?: string
+  customerEmail?: string
+  redeemed?: boolean
+  redeemedAt?: string
+  source?: 'welcome' | 'admin' | 'promo'
 }
 
 export type PromotionalBanner = {
@@ -221,6 +230,104 @@ export function deleteCoupon(id: string): boolean {
   if (filtered.length === coupons.length) return false
   writeCoupons(filtered)
   return true
+}
+
+export function couponsForCustomer(customerId: string): Coupon[] {
+  return readCoupons().filter((c) => c.customerId === customerId)
+}
+
+export function createPersonalCoupon(input: {
+  customerId: string
+  customerName: string
+  customerEmail: string
+  type?: 'percent' | 'flat'
+  value?: number
+  minOrderValue?: number
+  description?: string
+  source?: Coupon['source']
+}): Coupon {
+  const token = randomBytes(2).toString('hex').toUpperCase()
+  const slug = (input.customerName || 'GUEST').replace(/[^a-z0-9]/gi, '').slice(0, 8).toUpperCase() || 'GUEST'
+  const code = `CK-${slug}-${token}`
+  return createCoupon({
+    code,
+    type: input.type || 'percent',
+    value: input.value ?? 12,
+    minOrderValue: input.minOrderValue ?? 15000,
+    maxDiscount: 20000,
+    usageLimit: 1,
+    description: input.description || `Personal offer for ${input.customerName}`,
+    personal: true,
+    customerId: input.customerId,
+    customerName: input.customerName,
+    customerEmail: input.customerEmail,
+    redeemed: false,
+    source: input.source || 'admin',
+    active: true,
+  })
+}
+
+export function createWelcomeCoupon(customerId: string, customerName: string, customerEmail: string): Coupon | null {
+  const existing = readCoupons().find(
+    (c) => c.customerId === customerId && c.source === 'welcome' && !c.redeemed,
+  )
+  if (existing) return existing
+  return createPersonalCoupon({
+    customerId,
+    customerName,
+    customerEmail,
+    source: 'welcome',
+    value: 12,
+    minOrderValue: 15000,
+    description: `Welcome to CouchKraft — 12% off your first order, ${customerName.split(' ')[0] || 'friend'}.`,
+  })
+}
+
+export function redeemPersonalCoupon(code: string, customerId: string): boolean {
+  const coupons = readCoupons()
+  const idx = coupons.findIndex((c) => c.code.toUpperCase() === code.toUpperCase().trim())
+  if (idx === -1) return false
+  const coupon = coupons[idx]
+  if (!coupon.personal) return false
+  if (coupon.customerId !== customerId) return false
+  if (coupon.redeemed) return false
+  coupons[idx] = {
+    ...coupon,
+    redeemed: true,
+    redeemedAt: new Date().toISOString(),
+    usedCount: Math.max(coupon.usedCount, 1),
+    updatedAt: new Date().toISOString(),
+  }
+  writeCoupons(coupons)
+  return true
+}
+
+export function applyFileCouponDiscount(
+  coupon: Coupon,
+  subtotal: number,
+  customerId: string,
+): { ok: boolean; discount: number; message?: string } {
+  if (!coupon.active) return { ok: false, discount: 0, message: 'This offer is not active.' }
+  if (coupon.personal) {
+    if (coupon.customerId !== customerId) {
+      return { ok: false, discount: 0, message: 'This coupon is tied to another account.' }
+    }
+    if (coupon.redeemed) return { ok: false, discount: 0, message: 'This personal coupon has already been used.' }
+  } else if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+    return { ok: false, discount: 0, message: 'This coupon has reached its usage limit.' }
+  }
+  const minVal = Number(coupon.minOrderValue) || 0
+  if (subtotal < minVal) {
+    return { ok: false, discount: 0, message: `Minimum order for this coupon is ₹${minVal.toLocaleString('en-IN')}.` }
+  }
+  let discount = 0
+  if (coupon.type === 'percent') {
+    const calc = Math.round(subtotal * (Number(coupon.value) / 100))
+    discount = coupon.maxDiscount ? Math.min(calc, Number(coupon.maxDiscount)) : calc
+  } else {
+    discount = Math.min(subtotal, Number(coupon.value) || 0)
+  }
+  return { ok: true, discount }
 }
 
 export function readBanners(): PromotionalBanner[] {

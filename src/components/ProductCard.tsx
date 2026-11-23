@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Product } from '../data/products'
 import { useStore } from '../context/StoreContext'
-import { formatPrice } from '../utils/format'
-import { HeartIcon } from './Icons'
+import { ProductPriceWithOffer } from './ProductExtraDiscount'
+import { ChevronLeftIcon, ChevronRightIcon, HeartIcon } from './Icons'
 
 type ProductCardProps = {
   product: Product
@@ -105,20 +105,42 @@ export function ProductCard({ product, showPrice = true }: ProductCardProps) {
             ))}
           </div>
         ) : (
-          <Link to={`/product/${product.slug}`} className="product-slider-link" aria-label={product.name}>
-            <div className="product-slider" style={{ transform: `translateX(-${index * 100}%)` }}>
-              {images.map((src, imageIndex) => (
-                <img
-                  key={`${src}-${imageIndex}`}
-                  src={src}
-                  alt={imageIndex === 0 ? product.name : `${product.name}, view ${imageIndex + 1}`}
-                  width={640}
-                  height={600}
-                  loading="lazy"
-                />
-              ))}
-            </div>
-          </Link>
+          <>
+            <Link to={`/product/${product.slug}`} className="product-slider-link" aria-label={product.name}>
+              <div className="product-slider" style={{ transform: `translateX(-${index * 100}%)` }}>
+                {images.map((src, imageIndex) => (
+                  <img
+                    key={`${src}-${imageIndex}`}
+                    src={src}
+                    alt={imageIndex === 0 ? product.name : `${product.name}, view ${imageIndex + 1}`}
+                    width={640}
+                    height={600}
+                    loading="lazy"
+                  />
+                ))}
+              </div>
+            </Link>
+            {hasMultiple ? (
+              <>
+                <button
+                  type="button"
+                  className="product-slide-arrow product-slide-arrow--prev"
+                  aria-label={`Previous image for ${product.name}`}
+                  onClick={(e) => goToIndex(index - 1, e)}
+                >
+                  <ChevronLeftIcon size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="product-slide-arrow product-slide-arrow--next"
+                  aria-label={`Next image for ${product.name}`}
+                  onClick={(e) => goToIndex(index + 1, e)}
+                >
+                  <ChevronRightIcon size={16} />
+                </button>
+              </>
+            ) : null}
+          </>
         )}
 
         {hasMultiple && (
@@ -153,12 +175,7 @@ export function ProductCard({ product, showPrice = true }: ProductCardProps) {
 
       <div className="product-meta">
         <Link to={`/product/${product.slug}`}>{product.name}</Link>
-        {showPrice ? (
-          <span>
-            {product.compareAt ? <span className="price-was">{formatPrice(product.compareAt)}</span> : null}
-            <strong>{formatPrice(product.price)}</strong>
-          </span>
-        ) : null}
+        {showPrice ? <ProductPriceWithOffer product={product} layout="inline" /> : null}
         {!product.madeToOrder && (product.readyToShipStock ?? 1) <= 0 ? (
           <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 600, display: 'block', marginTop: 3 }}>Out of stock</span>
         ) : !product.madeToOrder && (product.readyToShipStock ?? 10) <= (product.lowStockThreshold ?? 2) ? (

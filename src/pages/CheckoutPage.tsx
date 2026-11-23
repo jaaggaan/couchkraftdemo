@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useStore } from '../context/StoreContext'
-import { DemoPaymentModal, type DemoMethod } from '../components/DemoPaymentModal'
+import { PaymentGatewayPanel } from '../components/PaymentGatewayPanel'
+import type { DemoMethod } from '../components/DemoPaymentModal'
+import { validateCartStock } from '../lib/cart-api'
 import { checkoutApi } from '../lib/checkout-api'
 import { addressesApi, type Address } from '../lib/orders-api'
 import { loadRazorpayScript, openRazorpayCheckout } from '../lib/razorpay-checkout'
 import { formatPrice } from '../utils/format'
+import { CartLineDiscountNote } from '../components/ProductExtraDiscount'
 import type { Order } from '../lib/orders-api'
 
 const emptyAddress = {
@@ -21,7 +24,8 @@ const emptyAddress = {
 
 export function CheckoutPage() {
   const { user, loading, openAuth } = useAuth()
-  const { cart, coupon, cartSubtotal, cartDiscount, cartTotal, getCartProducts, clearCart } = useStore()
+  const { cart, coupon, cartSubtotal, cartDiscount, cartTotal, getCartProducts, clearCart, setQuantity, removeFromCart } =
+    useStore()
   const navigate = useNavigate()
   const lines = getCartProducts()
   const [addresses, setAddresses] = useState<Address[]>([])
@@ -33,13 +37,31 @@ export function CheckoutPage() {
   const [formError, setFormError] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
-  const [demoOpen, setDemoOpen] = useState(false)
+  const [paymentOpen, setPaymentOpen] = useState(false)
   const [pendingOrder, setPendingOrder] = useState<Order | null>(null)
+  const [checkoutGateway, setCheckoutGateway] = useState<'demo' | 'razorpay'>('demo')
+  const [razorpaySession, setRazorpaySession] = useState<{
+    keyId: string
+    razorpayOrderId: string
+    amount: number
+    currency: string
+  } | null>(null)
+  const [upiVpa, setUpiVpa] = useState('couchkraft.demo@oksbi')
+  const [payeeName, setPayeeName] = useState('CouchKraft')
+  const [paymentPanelMessage, setPaymentPanelMessage] = useState('')
   const paymentSettled = useRef(false)
 
   useEffect(() => {
     if (!loading && !user) openAuth('signin')
   }, [loading, user, openAuth])
+
+  useEffect(() => {
+    void checkoutApi.config().then((cfg) => {
+      if (cfg.gateway) setCheckoutGateway(cfg.gateway)
+      if (cfg.upiVpa) setUpiVpa(cfg.upiVpa)
+      if (cfg.payeeName) setPayeeName(cfg.payeeName)
+    })
+  }, [])
 
   useEffect(() => {
     if (!user) return
@@ -107,38 +129,12 @@ export function CheckoutPage() {
     return Object.keys(next).length === 0
   }
 
-  const pay = async () => {
-    if (!validate() || busy) return
+  const launchRazorpay = async (order: Order, session: NonNullable<typeof razorpaySession>) => {
+    if (!user || busy) return
     paymentSettled.current = false
     setBusy(true)
     setFormError('')
-    setStatus('Preparing your payment…')
-    const session = await checkoutApi.session({
-      items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity, finish: item.finish, customization: item.customization })),
-      coupon,
-      addressId: addressId || undefined,
-      name,
-      phone,
-      ...form,
-    })
-    if (session.alreadyPaid && session.order) {
-      clearCart()
-      navigate(`/order/confirmation/${session.order.id}`)
-      return
-    }
-    if (session.status >= 400 || !session.order || !session.razorpayOrderId) {
-      setBusy(false)
-      setStatus('')
-      setFormError(session.error || 'Checkout could not be started.')
-      return
-    }
-    if (session.gateway === 'demo' || !session.keyId) {
-      setPendingOrder(session.order)
-      setDemoOpen(true)
-      setBusy(false)
-      setStatus('')
-      return
-    }
+    setStatus('Opening Razorpay…')
     try {
       await loadRazorpayScript()
     } catch (error) {
@@ -147,14 +143,13 @@ export function CheckoutPage() {
       setFormError(error instanceof Error ? error.message : 'Razorpay Checkout could not be loaded.')
       return
     }
-    setStatus('Waiting for Razorpay Checkout…')
-    const orderId = session.order.id
+    const orderId = order.id
     const checkout = openRazorpayCheckout({
       key: session.keyId,
-      amount: session.amount || session.order.total * 100,
+      amount: session.amount || order.total * 100,
       currency: session.currency || 'INR',
       name: 'CouchKraft',
-      description: `Order ${session.order.number} (Test Mode)`,
+      description: `Order ${order.number} (Test Mode)`,
       order_id: session.razorpayOrderId,
       prefill: {
         name,
@@ -168,12 +163,12 @@ export function CheckoutPage() {
           if (paymentSettled.current) return
           setBusy(false)
           setStatus('')
-          setFormError('Checkout was closed before payment finished. This order is still pending and has not been marked paid.')
+          setFormError('Checkout was closed before payment finished. This order is still pending.')
         },
       },
       handler: (response) => {
         paymentSettled.current = true
-        setStatus('Verifying payment on the server…')
+        setStatus('Verifying payment…')
         void checkoutApi
           .verify({
             orderId,
@@ -184,12 +179,13 @@ export function CheckoutPage() {
           .then((result) => {
             if (result.order?.paymentStatus === 'paid') {
               clearCart()
+              setPaymentOpen(false)
               navigate(`/order/confirmation/${result.order.id}`)
               return
             }
             setBusy(false)
             setStatus('')
-            setFormError(result.error || 'Payment was not verified. This order has not been marked as paid.')
+            setFormError(result.error || 'Payment was not verified.')
           })
       },
     })
@@ -197,31 +193,106 @@ export function CheckoutPage() {
       paymentSettled.current = true
       setBusy(false)
       setStatus('')
-      const reason = response.error.description || 'The test payment failed.'
+      const reason = response.error.description || 'The payment failed.'
       setFormError(reason)
       void checkoutApi.fail(orderId, reason)
     })
     checkout.open()
   }
 
+  const continueToPayment = async () => {
+    if (!validate() || busy || !user) return
+    paymentSettled.current = false
+    setBusy(true)
+    setFormError('')
+    const stock = await validateCartStock(cart.map((item) => ({ productId: item.productId, quantity: item.quantity })))
+    if (!stock.ok) {
+      setBusy(false)
+      const issue = stock.issues[0]
+      if (issue?.reason === 'insufficient_stock' && issue.available > 0) {
+        const line = cart.find((i) => i.productId === issue.productId)
+        if (line) setQuantity(issue.productId, issue.available, line.customization)
+        setFormError(`Only ${issue.available} left for "${issue.productName}". Your bag was updated — try again.`)
+      } else if (issue) {
+        const line = cart.find((i) => i.productId === issue.productId)
+        if (line) removeFromCart(issue.productId, line.finish, line.customization)
+        setFormError(stock.message || `Removed "${issue.productName}" — not enough stock.`)
+      } else {
+        setFormError(stock.message || 'Please check your bag and try again.')
+      }
+      return
+    }
+    setStatus('Creating your order…')
+    const session = await checkoutApi.session({
+      items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity, finish: item.finish, customization: item.customization })),
+      coupon,
+      addressId: addressId || undefined,
+      name,
+      phone,
+      ...form,
+    })
+    setBusy(false)
+    setStatus('')
+    if (session.alreadyPaid && session.order) {
+      clearCart()
+      navigate(`/order/confirmation/${session.order.id}`)
+      return
+    }
+    if (session.status >= 400 || !session.order || !session.razorpayOrderId) {
+      if (session.code === 'insufficient_stock' && session.productId && session.availableStock != null) {
+        const line = cart.find((i) => i.productId === session.productId)
+        if (session.availableStock > 0 && line) {
+          setQuantity(session.productId, session.availableStock, line.customization)
+        } else if (line) {
+          removeFromCart(session.productId, line.finish, line.customization)
+        }
+      }
+      setFormError(session.error || 'Checkout could not be started.')
+      return
+    }
+    setCheckoutGateway(session.gateway === 'razorpay' && session.keyId ? 'razorpay' : 'demo')
+    setPendingOrder(session.order)
+    if (session.gateway === 'razorpay' && session.keyId) {
+      setRazorpaySession({
+        keyId: session.keyId,
+        razorpayOrderId: session.razorpayOrderId,
+        amount: session.amount || session.order.total * 100,
+        currency: session.currency || 'INR',
+      })
+    } else {
+      setRazorpaySession(null)
+    }
+    setPaymentPanelMessage('')
+    setPaymentOpen(true)
+  }
+
   const finishDemoPay = async (method: DemoMethod, action: 'success' | 'fail') => {
     if (!pendingOrder || busy) return
     setBusy(true)
     setFormError('')
+    setPaymentPanelMessage('')
     const result = await checkoutApi.demoPay({ orderId: pendingOrder.id, method, action })
     setBusy(false)
     if (result.order && !result.failed && result.order.paymentStatus !== 'failed') {
       clearCart()
-      setDemoOpen(false)
+      setPaymentOpen(false)
+      setPaymentPanelMessage('')
       navigate(`/order/confirmation/${result.order.id}`)
       return
     }
-    setFormError(result.error || 'Demo payment failed. You can retry from checkout.')
+    if (result.failed) {
+      setPaymentPanelMessage('That was only a test failure. Use “Confirm payment” above to finish your order.')
+      if (result.order) setPendingOrder(result.order)
+      return
+    }
+    const message = result.error || 'Payment could not be confirmed. Try again or close and continue to payment once more.'
+    setPaymentPanelMessage(message)
+    setFormError(message)
   }
 
   return (
     <main id="main" className="page-wrap checkout-page">
-      <p className="form-note">Demo payment gateway · no live charges</p>
+      <p className="form-note">YouPI-style secure checkout · UPI QR, apps, card, or COD</p>
       <h1>Checkout</h1>
       <div className="checkout-grid">
         <section className="checkout-main">
@@ -310,10 +381,10 @@ export function CheckoutPage() {
           </div>
           {formError ? <p className="auth-error">{formError}</p> : null}
           {status ? <p className="form-note">{status}</p> : null}
-          <button className="btn checkout-pay" type="button" disabled={busy} onClick={() => void pay()}>
-            {busy ? 'Please wait…' : `Pay Securely · ${formatPrice(cartTotal)}`}
+          <button className="btn checkout-pay" type="button" disabled={busy} onClick={() => void continueToPayment()}>
+            {busy ? 'Please wait…' : `Continue to payment · ${formatPrice(cartTotal)}`}
           </button>
-          <p className="form-note">Card, UPI, net banking or cash. This is a local demo gateway until Razorpay test keys are added.</p>
+          <p className="form-note">After you continue, you’ll verify your phone and pick UPI, card, net banking, or cash on delivery.</p>
         </section>
 
         <aside className="checkout-summary">
@@ -324,6 +395,7 @@ export function CheckoutPage() {
                 <img src={product.images[0]} alt="" />
                 <div>
                   <strong>{product.name}</strong>
+                  <CartLineDiscountNote product={product} />
                   <p className="form-note">
                     {finish} · Qty {quantity}
                   </p>
@@ -371,16 +443,26 @@ export function CheckoutPage() {
           </p>
         </aside>
       </div>
-      {demoOpen && pendingOrder ? (
-        <DemoPaymentModal
+      {paymentOpen && pendingOrder && user ? (
+        <PaymentGatewayPanel
+          order={pendingOrder}
           amount={pendingOrder.total}
-          orderNumber={pendingOrder.number}
+          customerPhone={phone}
+          customerEmail={user.email}
+          customerName={name}
+          gateway={checkoutGateway}
+          upiVpa={upiVpa}
+          payeeName={payeeName}
           busy={busy}
           onClose={() => {
-            setDemoOpen(false)
-            setFormError('Checkout was closed before payment finished. This order is still pending.')
+            setPaymentOpen(false)
+            setFormError('Payment was not completed. Your order is still pending.')
           }}
-          onPay={(method, action) => void finishDemoPay(method, action)}
+          onDemoPay={(method, action) => void finishDemoPay(method, action)}
+          onRazorpayPay={() => {
+            if (pendingOrder && razorpaySession) void launchRazorpay(pendingOrder, razorpaySession)
+          }}
+          serverMessage={paymentPanelMessage}
         />
       ) : null}
     </main>

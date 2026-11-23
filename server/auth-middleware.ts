@@ -1,10 +1,19 @@
 import { fetchLiveSettings } from './settings-store.ts'
-import { createCustomRequest } from './custom-request-store.ts'
+import {
+  createCustomRequest,
+  getCustomRequestForCustomer,
+  listCustomRequestsForCustomer,
+  markCustomRequestPaidFromOrder,
+} from './custom-request-store.ts'
+import {
+  customRequestObjectPath,
+  isAllowedReferenceImageUrl,
+  uploadPublicImage,
+} from './storage-upload.ts'
 import { handleAdminApi } from './admin-api-handler.ts'
 import { readProducts } from './product-store.ts'
-import { readBanners } from './marketing-store.ts'
+import { couponsForCustomer, createWelcomeCoupon, readBanners } from './marketing-store.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { createHmac } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import type { Plugin } from 'vite'
@@ -32,6 +41,8 @@ import {
   attachRazorpayOrder,
   cartFingerprint,
   createOrderFromCart,
+  createOrderFromBespokeQuote,
+  validateCartLines,
   findReusableCheckoutOrder,
   getOrderByNumberForCustomer,
   getOrderForCustomer,
@@ -39,14 +50,36 @@ import {
   markCashOnDelivery,
   markOrderPaid,
   markOrderPaymentFailed,
+  tryRedeemOrderCoupon,
   type OrderContact,
 } from './order-store.ts'
 import { createRazorpayOrder, razorpayConfigFrom, verifyRazorpaySignature } from './razorpay.ts'
+import { supabase } from './supabase-client.ts'
 
 const COOKIE = 'ck_session'
-const SECRET = process.env.COUCHKRAFT_AUTH_SECRET || createHmac('sha256', 'couchkraft-local').update('dev').digest('hex')
+function requiredAuthSecret(): string {
+  const secret = process.env.COUCHKRAFT_AUTH_SECRET?.trim()
+  if (!secret) {
+    throw new Error('COUCHKRAFT_AUTH_SECRET is required for customer session authentication.')
+  }
+  return secret
+}
+const SECRET = requiredAuthSecret()
 
 type Body = Record<string, unknown>
+
+async function readRawBuffer(req: IncomingMessage & { body?: unknown }, maxBytes = 5 * 1024 * 1024): Promise<Buffer> {
+  if (Buffer.isBuffer(req.body)) return req.body
+  const chunks: Buffer[] = []
+  let total = 0
+  for await (const chunk of req) {
+    const buf = Buffer.from(chunk)
+    total += buf.length
+    if (total > maxBytes) throw new Error('BODY_TOO_LARGE')
+    chunks.push(buf)
+  }
+  return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0)
+}
 
 async function readBody(req: IncomingMessage & { body?: unknown }): Promise<Body> {
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
@@ -141,6 +174,12 @@ function originFrom(req: IncomingMessage) {
   return `${proto}://${host}`
 }
 
+function demoLoginEnabled(env: Record<string, string | undefined>) {
+  return env.COUCHKRAFT_DEMO_LOGIN_ENABLED === 'true' ||
+    env.VERCEL_ENV === 'preview' ||
+    env.NODE_ENV !== 'production'
+}
+
 const checkoutLocks = new Set<string>()
 
 function parseCartItems(body: Body) {
@@ -182,9 +221,12 @@ export async function handleCouchkraftApi(
     !url.startsWith('/api/orders') &&
     !url.startsWith('/api/addresses') &&
     !url.startsWith('/api/checkout') &&
+    !url.startsWith('/api/cart') &&
     !url.startsWith('/api/admin') &&
     !url.startsWith('/api/products') &&
     !url.startsWith('/api/banners') &&
+    !url.startsWith('/api/coupons') &&
+    !url.startsWith('/api/account') &&
     !url.startsWith('/api/settings') &&
     !url.startsWith('/api/custom-requests')
   ) {
@@ -204,14 +246,58 @@ export async function handleCouchkraftApi(
             })
           }
 
+          if (req.method === 'POST' && url === '/api/custom-requests/upload') {
+            const user = await currentUser(req)
+            if (!user) {
+              return send(res, 401, { error: 'Please sign in to upload reference photos.' })
+            }
+            const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase()
+            if (!contentType.startsWith('image/')) {
+              return send(res, 400, { error: 'Please upload an image file (JPG, PNG, or WebP).' })
+            }
+            let buffer: Buffer
+            try {
+              buffer = await readRawBuffer(req, 5 * 1024 * 1024)
+            } catch {
+              return send(res, 413, { error: 'Image exceeds 5 MB limit.' })
+            }
+            if (!buffer.length) {
+              return send(res, 400, { error: 'Empty upload.' })
+            }
+            const headerName = String(req.headers['x-file-name'] || 'reference')
+            let fileName = 'reference'
+            try {
+              fileName = decodeURIComponent(headerName).replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80) || 'reference'
+            } catch {
+              fileName = 'reference'
+            }
+            const extFromType = contentType.replace('image/', '').replace('jpeg', 'jpg')
+            const ext = fileName.includes('.') ? fileName.split('.').pop()! : extFromType
+            const objectPath = customRequestObjectPath(user.id, fileName, ext)
+            const uploaded = await uploadPublicImage('custom-requests', objectPath, buffer, contentType)
+            return send(res, 200, {
+              url: uploaded.url,
+              source: uploaded.source,
+              warning: uploaded.warning,
+            })
+          }
+
           if (req.method === 'POST' && url === '/api/custom-requests') {
+            const user = await currentUser(req)
+            if (!user) {
+              return send(res, 401, { error: 'Please sign in to submit a custom request.' })
+            }
             const body = await readBody(req)
             const customerName = text(body, 'customerName').trim() || text(body, 'name').trim()
             const customerPhone = text(body, 'customerPhone').trim() || text(body, 'phone').trim()
             if (!customerPhone) {
-              return send(res, 400, { error: 'Please enter your phone number so our atelier can follow up.' })
+              return send(res, 400, { error: 'Please enter your phone number so we can follow up.' })
             }
-            const user = await currentUser(req)
+            const referenceImages = Array.isArray(body.referenceImages)
+              ? (body.referenceImages as unknown[]).filter(
+                  (v): v is string => typeof v === 'string' && isAllowedReferenceImageUrl(v),
+                )
+              : []
             const created = await createCustomRequest({
               customerId: user ? user.id : null,
               customerName: customerName || (user ? user.name : 'Bespoke Client'),
@@ -227,13 +313,14 @@ export async function handleCouchkraftApi(
               color: text(body, 'color'),
               budget: text(body, 'budget'),
               notes: text(body, 'notes'),
+              referenceImages,
             })
-            return send(res, 201, { ok: true, request: created, message: 'Your bespoke furniture commission has been safely submitted.' })
+            return send(res, 201, { ok: true, request: created, message: 'Your custom quote request was saved.' })
           }
 
           if (url.startsWith('/api/admin')) {
             const body = req.method !== 'GET' && req.method !== 'HEAD' ? await readBody(req) : {}
-            return handleAdminApi(req, res, url, body)
+            return await handleAdminApi(req, res, url, body)
           }
 
           if (req.method === 'GET' && url === '/api/products') {
@@ -242,6 +329,20 @@ export async function handleCouchkraftApi(
 
           if (req.method === 'GET' && url === '/api/banners') {
             return send(res, 200, { banners: readBanners() })
+          }
+
+          if (req.method === 'GET' && url === '/api/coupons') {
+            const { data, error } = await supabase
+              .from('coupons')
+              .select('id, code, type, value, min_order_value, max_discount, start_date, end_date, active, description')
+              .eq('active', true)
+
+            if (error) {
+              console.error('[CouponApi] Supabase read error:', error.message)
+              return send(res, 502, { error: 'Coupons are temporarily unavailable.' })
+            }
+
+            return send(res, 200, { coupons: data ?? [] })
           }
 
           if (req.method === 'GET' && url === '/api/auth/me') {
@@ -279,18 +380,31 @@ export async function handleCouchkraftApi(
             const created = await createCustomer({ name, email, phone, password })
             if ('error' in created) return send(res, 409, { error: 'An account with this email already exists.' })
 
+            const welcomeCoupon = createWelcomeCoupon(created.customer.id, created.customer.name, created.customer.email)
+
             // Dispatch real email OTP via Supabase Auth
             const otpSend = await sendEmailOtp(email)
             if (!otpSend.ok) console.warn('[Register OTP Send Notice]:', otpSend.error)
             return send(res, 201, {
               ok: true,
+              welcomeCoupon: welcomeCoupon
+                ? {
+                    code: welcomeCoupon.code,
+                    description: welcomeCoupon.description,
+                    value: welcomeCoupon.value,
+                    type: welcomeCoupon.type,
+                  }
+                : null,
               message: otpSend.ok
                 ? 'Account created! A 6-digit verification code has been dispatched to your email.'
                 : 'Account created! If you do not receive a verification code shortly, click Resend.',
             })
           }
 
-                    if (req.method === 'POST' && url === '/api/auth/demo-login') {
+          if (req.method === 'POST' && url === '/api/auth/demo-login') {
+            if (!demoLoginEnabled(runtimeEnv)) {
+              return send(res, 404, { error: 'Demo sign-in is not enabled in this environment.' })
+            }
             const demoEmail = 'asha.auth@example.com'
             const customer = await findByEmail(demoEmail)
             if (!customer) {
@@ -470,16 +584,38 @@ export async function handleCouchkraftApi(
           if (req.method === 'GET' && url === '/api/orders') {
             const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
-            return send(res, 200, { orders: listOrdersForCustomer(user.id) })
+            return send(res, 200, { orders: await listOrdersForCustomer(user.id) })
+          }
+
+          if (req.method === 'POST' && url === '/api/cart/validate') {
+            const body = await readBody(req)
+            const items = parseCartItems(body)
+            if (!items.length) return send(res, 400, { error: 'Your bag is empty.' })
+            const result = await validateCartLines(items)
+            return send(res, result.ok ? 200 : 409, {
+              ok: result.ok,
+              issues: result.issues,
+              message: result.ok
+                ? null
+                : result.issues[0]?.reason === 'insufficient_stock'
+                  ? `Only ${result.issues[0].available} left for "${result.issues[0].productName}".`
+                  : result.issues[0]?.reason === 'out_of_stock'
+                    ? `"${result.issues[0].productName}" is out of stock.`
+                    : 'Some items in your bag are no longer available.',
+            })
           }
 
           if (req.method === 'GET' && url === '/api/checkout/config') {
             const keys = razorpayConfigFrom(runtimeEnv)
+            const upiVpa = runtimeEnv.COUCHKRAFT_UPI_VPA?.trim() || 'couchkraft.demo@oksbi'
+            const payeeName = runtimeEnv.COUCHKRAFT_UPI_PAYEE_NAME?.trim() || 'CouchKraft'
             return send(res, 200, {
               configured: true,
               gateway: keys.ok ? 'razorpay' : 'demo',
               mode: keys.ok ? 'test' : 'demo',
               keyId: keys.ok ? keys.config.keyId : null,
+              upiVpa,
+              payeeName,
               error: null,
             })
           }
@@ -513,7 +649,8 @@ export async function handleCouchkraftApi(
                 phone,
               }
               const fingerprint = cartFingerprint(items, coupon, `${address.line1}|${address.city}|${address.postalCode}`)
-              let order = findReusableCheckoutOrder(user.id, fingerprint)
+              const checkoutKey = `${user.id}:${fingerprint}`
+              let order = await findReusableCheckoutOrder(user.id, checkoutKey)
               if (!order) {
                 const created = await createOrderFromCart(user.id, {
                   items,
@@ -521,25 +658,50 @@ export async function handleCouchkraftApi(
                   coupon,
                   contact,
                   paymentStatus: 'pending',
-                  cartFingerprint: fingerprint,
+                  cartFingerprint: checkoutKey,
                 })
-                if ('error' in created) return send(res, 400, { error: (created as any).message || 'Your bag has no valid pieces to order.' })
+                if ('error' in created) {
+                  const fail = created as {
+                    error: string
+                    message?: string
+                    productId?: string
+                    productName?: string
+                    availableStock?: number
+                    requestedQuantity?: number
+                    issues?: unknown[]
+                  }
+                  if (fail.error === 'insufficient_stock') {
+                    return send(res, 409, {
+                      error: fail.message || 'Not enough stock.',
+                      code: 'insufficient_stock',
+                      productId: fail.productId,
+                      productName: fail.productName,
+                      availableStock: fail.availableStock,
+                      requestedQuantity: fail.requestedQuantity,
+                      issues: fail.issues,
+                    })
+                  }
+                  return send(res, 400, { error: fail.message || 'Your bag has no valid pieces to order.' })
+                }
                 order = created.order
               }
               if (order.paymentStatus === 'paid') {
                 return send(res, 200, { order, alreadyPaid: true, gateway: keys.ok ? 'razorpay' : 'demo' })
               }
-              if (!order.razorpayOrderId) {
-                if (keys.ok) {
+              const demoRazorpayId = `order_demo_${order.id}`
+              if (keys.ok) {
+                if (!order.razorpayOrderId || order.razorpayOrderId.startsWith('order_demo_')) {
                   const razorpayOrder = await createRazorpayOrder(keys.config, {
                     amountPaise: order.amountPaise,
                     receipt: order.number,
                     notes: { couchkraftOrderId: order.id, customerId: user.id },
                   })
-                  order = attachRazorpayOrder(order.id, user.id, razorpayOrder.id) || order
-                } else {
-                  order = attachRazorpayOrder(order.id, user.id, `order_demo_${order.id}`) || order
+                  order = (await attachRazorpayOrder(order.id, user.id, razorpayOrder.id)) || order
                 }
+              } else if (!order.razorpayOrderId || !order.razorpayOrderId.startsWith('order_demo_')) {
+                order = (await attachRazorpayOrder(order.id, user.id, demoRazorpayId)) || order
+              } else if (order.paymentStatus === 'failed') {
+                order = (await attachRazorpayOrder(order.id, user.id, demoRazorpayId)) || order
               }
               return send(res, 200, {
                 gateway: keys.ok ? 'razorpay' : 'demo',
@@ -561,9 +723,6 @@ export async function handleCouchkraftApi(
           if (req.method === 'POST' && url === '/api/checkout/demo') {
             const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
-            if (razorpayConfigFrom(runtimeEnv).ok) {
-              return send(res, 400, { error: 'Demo gateway is disabled while Razorpay test keys are configured.' })
-            }
             const body = await readBody(req)
             const orderId = text(body, 'orderId')
             const method = text(body, 'method')
@@ -572,13 +731,13 @@ export async function handleCouchkraftApi(
             if (!methods.includes(method as (typeof methods)[number])) {
               return send(res, 400, { error: 'Choose card, cash, UPI or net banking.' })
             }
-            const existing = getOrderForCustomer(user.id, orderId)
+            const existing = await getOrderForCustomer(user.id, orderId)
             if (!existing) return send(res, 404, { error: 'Order not found.' })
-            if (!existing.razorpayOrderId?.startsWith('order_demo_')) {
-              return send(res, 400, { error: 'This order is not using the demo gateway.' })
+            if (!existing.razorpayOrderId) {
+              return send(res, 400, { error: 'Payment was not started for this order. Close and tap Continue to payment again.' })
             }
             if (action === 'fail') {
-              const order = markOrderPaymentFailed(orderId, user.id, 'Demo payment failed.')
+              const order = await markOrderPaymentFailed(orderId, user.id, 'Demo payment failed.')
               return send(res, 200, { order, failed: true })
             }
             const labels: Record<string, string> = {
@@ -593,6 +752,8 @@ export async function handleCouchkraftApi(
                 razorpayOrderId: existing.razorpayOrderId,
               })
               if ('error' in result) return send(res, 400, { error: 'This payment does not match the order on your account.' })
+              tryRedeemOrderCoupon(user.id, result.order.coupon)
+              await markCustomRequestPaidFromOrder(result.order)
               return send(res, 200, { order: result.order })
             }
             const result = await markOrderPaid(user.id, {
@@ -603,6 +764,8 @@ export async function handleCouchkraftApi(
               deliveryMethod: labels[method],
             })
             if ('error' in result) return send(res, 400, { error: 'This payment does not match the order on your account.' })
+            tryRedeemOrderCoupon(user.id, result.order.coupon)
+            await markCustomRequestPaidFromOrder(result.order)
             return send(res, 200, { order: result.order })
           }
 
@@ -625,7 +788,7 @@ export async function handleCouchkraftApi(
               signature,
             })
             if (!valid) {
-              markOrderPaymentFailed(orderId, user.id, 'Payment signature could not be verified.')
+              await markOrderPaymentFailed(orderId, user.id, 'Payment signature could not be verified.')
               return send(res, 400, { error: 'Payment could not be verified. This order has not been marked as paid.' })
             }
             const result = await markOrderPaid(user.id, { orderId, razorpayOrderId, razorpayPaymentId })
@@ -637,14 +800,136 @@ export async function handleCouchkraftApi(
                     : 'This payment does not match the order on your account.',
               })
             }
+            tryRedeemOrderCoupon(user.id, result.order.coupon)
+            await markCustomRequestPaidFromOrder(result.order)
             return send(res, 200, { order: result.order })
+          }
+
+          if (req.method === 'GET' && url === '/api/account/custom-requests') {
+            const user = await currentUser(req)
+            if (!user) return send(res, 401, { error: 'Please sign in.' })
+            const requests = await listCustomRequestsForCustomer(user.id)
+            return send(res, 200, { requests })
+          }
+
+          const customReqMatch = url.match(/^\/api\/account\/custom-requests\/([^/]+)$/)
+          if (customReqMatch && req.method === 'GET') {
+            const user = await currentUser(req)
+            if (!user) return send(res, 401, { error: 'Please sign in.' })
+            const request = await getCustomRequestForCustomer(user.id, customReqMatch[1])
+            if (!request) return send(res, 404, { error: 'Custom request not found.' })
+            return send(res, 200, { request })
+          }
+
+          const bespokePayMatch = url.match(/^\/api\/account\/custom-requests\/([^/]+)\/payment-session$/)
+          if (bespokePayMatch && req.method === 'POST') {
+            const user = await currentUser(req)
+            if (!user) return send(res, 401, { error: 'Please sign in to pay.' })
+            const keys = razorpayConfigFrom(runtimeEnv)
+            const request = await getCustomRequestForCustomer(user.id, bespokePayMatch[1])
+            if (!request) return send(res, 404, { error: 'Custom request not found.' })
+            if (request.status !== 'approved') {
+              return send(res, 400, { error: 'Payment is available once your commission is approved.' })
+            }
+            if (request.paymentStatus === 'paid') {
+              return send(res, 200, { alreadyPaid: true, request })
+            }
+            const quoteAmount = Number(request.quoteAmount)
+            if (!Number.isFinite(quoteAmount) || quoteAmount < 1) {
+              return send(res, 400, { error: 'Our atelier has not published your commission amount yet.' })
+            }
+            const phone = user.phone || request.customerPhone
+            if (!phoneOk(phone)) {
+              return send(res, 400, { error: 'Add a phone number on your profile before paying.' })
+            }
+            const address =
+              user.addresses[0] ||
+              ({
+                id: 'bespoke',
+                label: 'Commission',
+                line1: 'Delivery address to be confirmed',
+                line2: '',
+                city: 'Bengaluru',
+                region: 'Karnataka',
+                postalCode: '560001',
+                country: 'India',
+              } as const)
+            const contact: OrderContact = {
+              name: user.name,
+              email: user.email,
+              phone,
+            }
+            const thumb =
+              request.referenceImages?.[0] ||
+              (request.dimensions as { referenceImages?: string[] } | undefined)?.referenceImages?.[0]
+            try {
+              const created = await createOrderFromBespokeQuote(user.id, {
+                customRequestId: request.id,
+                productName: request.productName || 'Custom furniture',
+                productId: request.productId,
+                image: thumb,
+                quoteAmount,
+                contact,
+                address,
+              })
+              if ('error' in created) {
+                return send(res, 400, { error: created.message || 'Could not start payment.' })
+              }
+              let order = created.order
+              if (order.paymentStatus === 'paid') {
+                await markCustomRequestPaidFromOrder(order)
+                return send(res, 200, { order, alreadyPaid: true, gateway: keys.ok ? 'razorpay' : 'demo' })
+              }
+              const demoRazorpayId = `order_demo_${order.id}`
+              if (keys.ok) {
+                if (!order.razorpayOrderId || order.razorpayOrderId.startsWith('order_demo_')) {
+                  const razorpayOrder = await createRazorpayOrder(keys.config, {
+                    amountPaise: order.amountPaise,
+                    receipt: order.number,
+                    notes: { couchkraftOrderId: order.id, customerId: user.id, customRequestId: request.id },
+                  })
+                  order = (await attachRazorpayOrder(order.id, user.id, razorpayOrder.id)) || order
+                }
+              } else if (!order.razorpayOrderId || !order.razorpayOrderId.startsWith('order_demo_')) {
+                order = (await attachRazorpayOrder(order.id, user.id, demoRazorpayId)) || order
+              }
+              return send(res, 200, {
+                gateway: keys.ok ? 'razorpay' : 'demo',
+                keyId: keys.ok ? keys.config.keyId : null,
+                razorpayOrderId: order.razorpayOrderId,
+                amount: order.amountPaise,
+                currency: 'INR',
+                order,
+              })
+            } catch (error) {
+              return send(res, 502, {
+                error: error instanceof Error ? error.message : 'Payment could not be started.',
+              })
+            }
+          }
+
+          if (req.method === 'GET' && url === '/api/account/coupons') {
+            const user = await currentUser(req)
+            if (!user) return send(res, 401, { error: 'Please sign in.' })
+            const personal = couponsForCustomer(user.id).map((c) => ({
+              id: c.id,
+              code: c.code,
+              description: c.description,
+              type: c.type,
+              value: c.value,
+              minOrderValue: c.minOrderValue,
+              redeemed: Boolean(c.redeemed),
+              redeemedAt: c.redeemedAt || null,
+              source: c.source || 'promo',
+            }))
+            return send(res, 200, { coupons: personal })
           }
 
           if (req.method === 'POST' && url === '/api/checkout/fail') {
             const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const body = await readBody(req)
-            const order = markOrderPaymentFailed(
+            const order = await markOrderPaymentFailed(
               text(body, 'orderId'),
               user.id,
               text(body, 'reason') || 'Payment failed or was cancelled.',
@@ -674,7 +959,7 @@ export async function handleCouchkraftApi(
             const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
             const number = new URL(req.url || '', 'http://localhost').searchParams.get('number') || ''
-            const order = getOrderByNumberForCustomer(user.id, number)
+            const order = await getOrderByNumberForCustomer(user.id, number)
             if (!order) return send(res, 404, { error: 'No matching order was found on this account.' })
             return send(res, 200, { order })
           }
@@ -683,7 +968,7 @@ export async function handleCouchkraftApi(
           if (orderMatch && req.method === 'GET') {
             const user = await currentUser(req)
             if (!user) return send(res, 401, { error: 'Please sign in.' })
-            const order = getOrderForCustomer(user.id, orderMatch[1])
+            const order = await getOrderForCustomer(user.id, orderMatch[1])
             if (!order) return send(res, 404, { error: 'Order not found.' })
             return send(res, 200, { order })
           }
@@ -716,8 +1001,19 @@ export function authApiPlugin(env: Record<string, string> = {}): Plugin {
     name: 'couchkraft-auth-api',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        const handled = await handleCouchkraftApi(req, res, runtimeEnv)
-        if (!handled) next()
+        try {
+          const handled = await handleCouchkraftApi(req, res, runtimeEnv)
+          if (!handled) next()
+        } catch (error) {
+          if (res.headersSent) {
+            next(error)
+            return
+          }
+          const message = error instanceof Error ? error.message : 'Something went wrong. Please try again.'
+          res.statusCode = 500
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: message }))
+        }
       })
     },
   }

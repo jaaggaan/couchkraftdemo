@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b tsconfig.app.json tsconfig.node.json && vite build && npm run build --prefix admin && npm run bundle:api",
     "bundle:api": "npx esbuild server/vercel-handler.ts --bundle --platform=node --format=esm --outfile=api/index.js --packages=external",
+    "provision:demo": "npx esbuild scripts/provision-demo-customer.ts --bundle --platform=node --format=esm --outfile=.provision-demo-customer.mjs --packages=external && node .provision-demo-customer.mjs; status=$?; rm -f .provision-demo-customer.mjs; exit $status",
+    "verify:inventory": "npx esbuild scripts/verify-inventory-rpc.ts --bundle --platform=node --format=esm --outfile=.verify-inventory-rpc.mjs --packages=external && node .verify-inventory-rpc.mjs; status=$?; rm -f .verify-inventory-rpc.mjs; exit $status",
     "lint": "oxlint",
     "preview": "vite preview",
     "postinstall": "npm --prefix admin install"

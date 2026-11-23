@@ -1,5 +1,5 @@
 import { useState, useRef, ChangeEvent, DragEvent } from 'react'
-import { supabase } from '../lib/supabase'
+import { uploadAdminImage } from '../lib/upload-image'
 
 interface ImageUploaderProps {
   images: string[]
@@ -63,38 +63,8 @@ export function ImageUploader({
         const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
         const filePath = `${cleanSlug}-${uniqueId}.${ext}`
 
-        const { data, error } = await supabase.storage.from(bucketName).upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false,
-          contentType: file.type,
-        })
-
-        if (error) {
-          if (
-            error.message?.includes('Bucket not found') ||
-            (error as any).statusCode === '404' ||
-            (error as any).code === 'NoSuchBucket'
-          ) {
-            throw new Error(
-              `Supabase Storage bucket "${bucketName}" not found. Please create the public bucket in your Supabase dashboard or SQL editor.`
-            )
-          } else if (
-            error.message?.includes('row-level security') ||
-            (error as any).statusCode === '403' ||
-            (error as any).code === 'AccessDenied'
-          ) {
-            throw new Error(
-              `Storage RLS permission error. Please enable public INSERT/SELECT policies on the "${bucketName}" bucket.`
-            )
-          } else {
-            throw new Error(error.message || 'Image upload failed.')
-          }
-        }
-
-        const { data: publicData } = supabase.storage.from(bucketName).getPublicUrl(filePath)
-        if (publicData?.publicUrl) {
-          uploadedUrls.push(publicData.publicUrl)
-        }
+        const publicUrl = await uploadAdminImage(file, filePath, bucketName)
+        uploadedUrls.push(publicUrl)
       }
 
       if (replacingIndex !== null && uploadedUrls.length > 0) {

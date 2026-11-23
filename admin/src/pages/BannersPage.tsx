@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, ChangeEvent } from 'react'
 import { adminApi } from '../lib/api'
+import { uploadAdminImage } from '../lib/upload-image'
+import { resolveStorefrontAsset } from '../lib/assets'
 import { supabase } from '../lib/supabase'
 
 interface Banner {
@@ -92,21 +94,9 @@ export function BannersPage() {
     try {
       const ext = file.name.split('.').pop() || 'jpg'
       const fileName = `banner-${type}-${Date.now()}.${ext}`
-      const { data, error } = await supabase.storage.from('products').upload(fileName, file, {
-        cacheControl: '3600',
-        upsert: true,
-        contentType: file.type,
-      })
-
-      if (error) {
-        throw new Error(error.message)
-      }
-
-      const { data: publicData } = supabase.storage.from('products').getPublicUrl(fileName)
-      if (publicData?.publicUrl) {
-        if (isDesk) setForm((f) => ({ ...f, desktopImage: publicData.publicUrl }))
-        else setForm((f) => ({ ...f, mobileImage: publicData.publicUrl }))
-      }
+      const publicUrl = await uploadAdminImage(file, fileName, 'products', true)
+      if (isDesk) setForm((f) => ({ ...f, desktopImage: publicUrl }))
+      else setForm((f) => ({ ...f, mobileImage: publicUrl }))
     } catch (err: any) {
       alert(`Image upload failed: ${err.message}. You can also type or paste an image URL directly.`)
     } finally {
@@ -225,12 +215,12 @@ export function BannersPage() {
               {/* Preview Thumbnail */}
               <div style={{ width: '100%', minHeight: 160, background: 'var(--surface-container)', position: 'relative', overflow: 'hidden' }}>
                 <img
-                  src={b.desktopImage || '/hero-living-hd.jpg'}
+                  src={resolveStorefrontAsset(b.desktopImage || '/hero-living-hd.jpg')}
                   alt={b.title}
                   onError={(e) => {
-                    ;(e.target as HTMLImageElement).src = '/hero-living-hd.jpg'
+                    ;(e.target as HTMLImageElement).src = resolveStorefrontAsset('/hero-living-hd.jpg')
                   }}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  style={{ width: '100%', height: '100%', minHeight: 160, objectFit: 'cover' }}
                 />
                 <div style={{ position: 'absolute', bottom: 6, left: 6, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600 }}>
                   Order #{b.displayOrder}
@@ -506,7 +496,7 @@ export function BannersPage() {
                 </div>
                 {form.desktopImage && (
                   <div style={{ marginTop: 8, width: '100%', height: 110, borderRadius: 8, overflow: 'hidden', background: '#f3ede2' }}>
-                    <img src={form.desktopImage} alt="Desktop Preview" onError={(e) => { (e.target as HTMLImageElement).src = '/hero-living-hd.jpg' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <img src={resolveStorefrontAsset(form.desktopImage)} alt="Desktop Preview" onError={(e) => { (e.target as HTMLImageElement).src = resolveStorefrontAsset('/hero-living-hd.jpg') }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   </div>
                 )}
               </div>
@@ -541,7 +531,7 @@ export function BannersPage() {
                 </div>
                 {form.mobileImage && (
                   <div style={{ marginTop: 8, width: 120, height: 80, borderRadius: 8, overflow: 'hidden', background: '#f3ede2' }}>
-                    <img src={form.mobileImage} alt="Mobile Preview" onError={(e) => { (e.target as HTMLImageElement).src = '/hero-living-scene.jpg' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <img src={resolveStorefrontAsset(form.mobileImage)} alt="Mobile Preview" onError={(e) => { (e.target as HTMLImageElement).src = resolveStorefrontAsset('/hero-living-scene.jpg') }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   </div>
                 )}
               </div>

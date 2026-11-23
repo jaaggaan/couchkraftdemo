@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ordersApi, type Order } from '../../lib/orders-api'
 import { formatDate, formatPrice } from '../../utils/format'
+import { OrderTrackingFeed } from '../../components/OrderTrackingFeed'
 
 function paymentLabel(order: Order) {
   if (order.paymentMethod === 'cash') return 'Cash on delivery'
@@ -55,7 +56,10 @@ export function OrdersList() {
     return (
       <div className="account-empty">
         <h2>My orders</h2>
-        <p>No orders are on this account yet. Pieces you place from your bag will appear here.</p>
+        <p>
+          No orders are linked to this account yet. Checkout while signed in (same email as your profile) so orders appear here.
+          Older guest checkouts may not show until they match your account email in our system.
+        </p>
         <Link className="btn" to="/shop">
           Continue shopping
         </Link>
@@ -65,6 +69,7 @@ export function OrdersList() {
 
   return (
     <div>
+      <OrderTrackingFeed />
       <h2>My orders</h2>
       <ul className="order-list">
         {orders.map((order) => (

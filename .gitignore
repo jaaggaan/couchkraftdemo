@@ -34,3 +34,5 @@ check_storage.mjs
 data/admin-audit.json
 data/custom_requests.json
 admin/dist
+.provision-demo-customer.mjs
+.youpi-pg-ref/

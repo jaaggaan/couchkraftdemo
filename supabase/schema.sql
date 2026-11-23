@@ -118,6 +118,7 @@ create table if not exists public.customers (
     password_hash text not null,
     email_verified boolean default false,
     verify_token text,
+    verify_expires bigint,
     reset_token text,
     reset_expires bigint,
     addresses jsonb default '[]'::jsonb,

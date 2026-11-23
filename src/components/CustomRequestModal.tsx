@@ -1,5 +1,5 @@
-import { buildCustomFurnitureWhatsAppMessage, getWhatsAppUrl, COUCHKRAFT_WHATSAPP_PHONE } from '../utils/whatsapp'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties, type FormEvent } from 'react'
+import { useAuth } from '../context/AuthContext'
 
 export type CustomRequestModalProps = {
   isOpen: boolean
@@ -13,31 +13,79 @@ export type CustomRequestModalProps = {
   } | null
 }
 
+const fieldLabel: CSSProperties = {
+  display: 'block',
+  fontSize: 12,
+  fontWeight: 600,
+  color: '#44403c',
+  marginBottom: 4,
+}
+
+const fieldInput: CSSProperties = {
+  width: '100%',
+  height: 40,
+  padding: '0 12px',
+  borderRadius: 8,
+  border: '1px solid #e7e5e4',
+  background: '#fafaf9',
+  fontSize: 13,
+}
+
+const MAX_IMAGES = 4
+const MAX_IMAGE_BYTES = 2_500_000
+
+type PendingReference = {
+  id: string
+  file: File
+  preview: string
+}
+
+async function uploadReferencePhoto(file: File): Promise<string> {
+  const res = await fetch('/api/custom-requests/upload', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-File-Name': encodeURIComponent(file.name || 'reference.jpg'),
+    },
+    body: file,
+  })
+  if (res.status === 401) throw new Error('AUTH')
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(data.error || 'Upload failed')
+  }
+  const data = (await res.json()) as { url: string }
+  if (!data.url) throw new Error('Upload failed')
+  return data.url
+}
+
 export function CustomRequestModal({ isOpen, onClose, product }: CustomRequestModalProps) {
+  const { user, openAuth } = useAuth()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [pieceName, setPieceName] = useState(product?.name || '')
-  const [seating, setSeating] = useState('3-Seater')
-  const [dimensions, setDimensions] = useState('220cm W × 95cm D × 80cm H')
-  const [material, setMaterial] = useState('Kiln-Dried Teak Wood & Belgian Linen')
-  const [color, setColor] = useState('Warm Ivory / Oatmeal')
-  const [budget, setBudget] = useState('₹75,000 – ₹1,50,000')
+  const [size, setSize] = useState('')
+  const [look, setLook] = useState('')
+  const [budget, setBudget] = useState('')
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
-  const [businessPhone, setBusinessPhone] = useState<string>('+91 63607 04340')
+  const [submitOk, setSubmitOk] = useState(false)
+  const [submittedId, setSubmittedId] = useState('')
+  const [pendingImages, setPendingImages] = useState<PendingReference[]>([])
+  const pendingImagesRef = useRef(pendingImages)
+  const [imageError, setImageError] = useState('')
 
-  // Fetch WhatsApp settings
   useEffect(() => {
-    fetch('/api/settings/public')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.whatsapp?.businessPhone) {
-          setBusinessPhone(d.whatsapp.businessPhone)
-        }
-      })
-      .catch(() => {})
+    pendingImagesRef.current = pendingImages
+  }, [pendingImages])
+
+  const revokePreviews = useCallback((items: PendingReference[]) => {
+    items.forEach((item) => {
+      if (item.preview.startsWith('blob:')) URL.revokeObjectURL(item.preview)
+    })
   }, [])
 
   useEffect(() => {
@@ -46,380 +94,340 @@ export function CustomRequestModal({ isOpen, onClose, product }: CustomRequestMo
     }
   }, [product])
 
+  useEffect(() => {
+    if (!isOpen) return
+    if (user) {
+      setName(user.name)
+      setEmail(user.email)
+      setPhone((prev) => user.phone || prev)
+    }
+  }, [isOpen, user])
+
+  useEffect(
+    () => () => {
+      revokePreviews(pendingImagesRef.current)
+    },
+    [revokePreviews],
+  )
+
+  const handleImagePick = (files: FileList | null) => {
+    if (!files?.length) return
+    setImageError('')
+    const picked = Array.from(files).slice(0, MAX_IMAGES - pendingImages.length)
+    const next: PendingReference[] = []
+    for (const file of picked) {
+      if (!file.type.startsWith('image/')) {
+        setImageError('Please upload image files only (JPG, PNG, WebP).')
+        continue
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        setImageError('Each image must be under 2.5 MB.')
+        continue
+      }
+      next.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        file,
+        preview: URL.createObjectURL(file),
+      })
+    }
+    if (next.length) setPendingImages((prev) => [...prev, ...next].slice(0, MAX_IMAGES))
+  }
+
+  const removePendingImage = (id: string) => {
+    setPendingImages((prev) => {
+      const removed = prev.find((p) => p.id === id)
+      if (removed?.preview.startsWith('blob:')) URL.revokeObjectURL(removed.preview)
+      return prev.filter((p) => p.id !== id)
+    })
+  }
+
+  const canonicalUrl = useMemo(() => {
+    if (typeof window === 'undefined') return ''
+    return product?.slug ? `${window.location.origin}/product/${product.slug}` : window.location.href
+  }, [product?.slug])
+
   if (!isOpen) return null
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const clearFormFields = () => {
+    setPieceName(product?.name || '')
+    setSize('')
+    setLook('')
+    setBudget('')
+    setNotes('')
+    revokePreviews(pendingImages)
+    setPendingImages([])
+    setImageError('')
+  }
+
+  const resetForm = () => {
+    clearFormFields()
+    setStatusMsg('')
+    setSubmitOk(false)
+    setSubmittedId('')
+  }
+
+  const handleClose = () => {
+    resetForm()
+    onClose()
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
+    if (!user) {
+      setStatusMsg('Please sign in to submit — we’ll link this request to your account.')
+      openAuth('signin')
+      return
+    }
     if (!phone.trim()) {
-      setStatusMsg('Please provide your phone number so our atelier can follow up.')
+      setStatusMsg('Please add a phone number so we can reach you.')
+      setSubmitOk(false)
       return
     }
 
     setLoading(true)
     setStatusMsg('')
+    setSubmitOk(false)
 
     try {
-      const canonicalUrl = typeof window !== 'undefined' && product?.slug ? `${window.location.origin}/product/${product.slug}` : window.location.href
+      let referenceImages: string[] = []
+      if (pendingImages.length) {
+        const urls = await Promise.all(pendingImages.map((item) => uploadReferencePhoto(item.file)))
+        referenceImages = urls
+      }
 
-      // 1. Persist the bespoke enquiry into database
       const res = await fetch('/api/custom-requests', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerName: name,
-          customerEmail: email,
+          customerName: name || user.name,
+          customerEmail: email || user.email,
           customerPhone: phone,
           productId: product?.id,
-          productName: pieceName || (product ? product.name : 'Custom Bespoke Furniture'),
+          productName: pieceName || product?.name || 'Custom furniture',
           productUrl: canonicalUrl,
-          seatingCapacity: seating,
-          dimensions: { raw: dimensions },
-          material,
-          color,
+          seatingCapacity: size,
+          dimensions: { raw: size },
+          material: look,
+          color: '',
           budget,
           notes,
+          referenceImages,
         }),
       })
-      await res.json()
-
-      // 2. Check if business WhatsApp number is configured
-      const cleanPhone = (businessPhone || '').replace(/[^0-9]/g, '')
-
-      if (cleanPhone && cleanPhone.length >= 7) {
-        // Construct pre-filled concise template with placeholders completed
-        const msg = buildCustomFurnitureWhatsAppMessage({
-          productName: pieceName || (product ? product.name : 'Custom Furniture Piece'),
-          productUrl: canonicalUrl,
-          clientName: name,
-          clientPhone: phone,
-          seating,
-          dimensions,
-          material,
-          color,
-          budget,
-          notes,
-        })
-
-        const waUrl = getWhatsAppUrl(cleanPhone || COUCHKRAFT_WHATSAPP_PHONE, msg)
-        
-        // Open WhatsApp immediately (and allow direct link fallback)
-        try {
-          window.open(waUrl, '_blank')
-        } catch {}
-        
-        setStatusMsg('Enquiry submitted! Opening WhatsApp with your pre-filled specifications. If WhatsApp did not open automatically, click the button below.')
-      } else {
-        // Helpful message if business WhatsApp number is not configured in admin settings
-        setStatusMsg(
-          'Your bespoke commission enquiry has been successfully registered in our atelier database! (Note: CouchKraft WhatsApp Business concierge is currently being configured by the administrator in Admin Settings, and our atelier concierge will contact you directly via your provided phone and email).'
-        )
+      if (res.status === 401) {
+        setStatusMsg('Please sign in to submit your custom request.')
+        openAuth('signin')
+        return
       }
-    } catch {
-      setStatusMsg('Unable to submit enquiry at this moment. Please try again shortly.')
+      if (!res.ok) {
+        throw new Error('Request failed')
+      }
+
+      const payload = (await res.json()) as { request?: { id?: string } }
+      clearFormFields()
+      setSubmittedId(payload.request?.id || '')
+      setSubmitOk(true)
+      setStatusMsg('Our atelier will review your brief and contact you by phone or email.')
+    } catch (err) {
+      if (err instanceof Error && err.message === 'AUTH') {
+        setStatusMsg('Please sign in to upload photos and submit.')
+        openAuth('signin')
+      } else if (err instanceof Error && err.message) {
+        setStatusMsg(err.message)
+      } else {
+        setStatusMsg('Something went wrong. Please try again in a moment.')
+      }
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(28, 25, 23, 0.65)',
-        backdropFilter: 'blur(6px)', zIndex: 1000, display: 'flex',
-        alignItems: 'center', justifyContent: 'center', padding: 20,
-      }}
-      onClick={onClose}
-    >
+    <div className="custom-request-backdrop" onClick={handleClose}>
       <div
-        style={{
-          width: '100%', maxWidth: 580, maxHeight: '90vh', background: '#fff',
-          borderRadius: 16, overflowY: 'auto', padding: 28, position: 'relative',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-        }}
+        className={`custom-request-panel${submitOk ? ' custom-request-panel--success' : ''}`}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="custom-request-title"
       >
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            position: 'absolute', top: 20, right: 20, border: 'none',
-            background: 'var(--surface-cream, #f5f0eb)', width: 32, height: 32,
-            borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 16, color: 'var(--text-muted, #78716c)',
-          }}
-        >
+        <button type="button" onClick={handleClose} className="custom-request-close" aria-label="Close">
           ✕
         </button>
 
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: '#835022', textTransform: 'uppercase' }}>
-            CouchKraft Atelier Commission
-          </div>
-          <h2 style={{ fontFamily: 'Playfair Display', fontSize: 22, fontWeight: 600, color: '#1c1917', margin: '4px 0 8px' }}>
-            Request Custom-Made Furniture
-          </h2>
-          <p style={{ color: '#78716c', fontSize: 13, lineHeight: 1.5, margin: 0 }}>
-            Every home has singular architectural proportions. Share your custom dimensions, preferred fabrics, or silhouette requirements for a personalized atelier estimate.
-          </p>
-        </div>
-
-        {statusMsg && (
-          <div style={{
-            padding: '12px 16px', borderRadius: 8, marginBottom: 16, fontSize: 13,
-            background: statusMsg.includes('registered') ? '#dcfce7' : '#fef3c7',
-            color: statusMsg.includes('registered') ? '#166534' : '#92400e',
-            lineHeight: 1.5, fontWeight: 500,
-          }}>
-            {statusMsg}
-            <div style={{ marginTop: 10 }}>
-              <a
-                href={getWhatsAppUrl(
-                  businessPhone || COUCHKRAFT_WHATSAPP_PHONE,
-                  buildCustomFurnitureWhatsAppMessage({
-                    productName: pieceName || (product ? product.name : 'Custom Furniture Piece'),
-                    productUrl: typeof window !== 'undefined' ? window.location.href : '',
-                    clientName: name,
-                    clientPhone: phone,
-                    seating,
-                    dimensions,
-                    material,
-                    color,
-                    budget,
-                    notes,
-                  })
-                )}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-                  borderRadius: 6, background: '#29241f', color: '#fff', textDecoration: 'none',
-                  fontSize: 12, fontWeight: 700,
+        {submitOk ? (
+          <div className="custom-request-success">
+            <div className="custom-request-success-icon" aria-hidden>
+              ✓
+            </div>
+            <p className="custom-request-eyebrow">Custom order</p>
+            <h2 id="custom-request-title" className="custom-request-success-title">
+              Request received
+            </h2>
+            <p className="custom-request-success-body">{statusMsg}</p>
+            {submittedId ? (
+              <p className="custom-request-success-ref">
+                Reference <strong>{submittedId}</strong>
+              </p>
+            ) : null}
+            <div className="custom-request-success-actions">
+              <button type="button" className="custom-request-btn primary" onClick={handleClose}>
+                Done
+              </button>
+              <button
+                type="button"
+                className="custom-request-btn secondary"
+                onClick={() => {
+                  resetForm()
                 }}
               >
-                <span>💬</span> Click Here to Open WhatsApp Directly with Pre-Loaded Message
-              </a>
+                Submit another request
+              </button>
             </div>
           </div>
-        )}
-
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Piece Reference */}
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-              Furniture Piece Reference
-            </label>
-            <input
-              type="text"
-              value={pieceName}
-              onChange={(e) => setPieceName(e.target.value)}
-              placeholder="E.g. Arden Three-Seater Custom Sectional, or Bespoke Dining Table"
-              style={{
-                width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-              }}
-            />
-          </div>
-
-          {/* Contact Details */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-                Your Name
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Aarav Sharma"
-                style={{
-                  width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                  border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-                }}
-              />
+        ) : (
+          <>
+            <div className="custom-request-header">
+              <p className="custom-request-eyebrow">Custom order</p>
+              <h2 id="custom-request-title" className="custom-request-title">
+                Request a custom quote
+              </h2>
+              <p className="custom-request-lead">
+                Share your brief and reference photos. We save everything to your enquiry — our team follows up personally; no payment on this step.
+              </p>
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-                Phone Number (WhatsApp) *
-              </label>
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+91 98765 43210"
-                required
-                style={{
-                  width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                  border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-                }}
-              />
-            </div>
-          </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-              Email Address (Optional)
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="aarav@example.com"
-              style={{
-                width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-              }}
-            />
-          </div>
-
-          {/* Custom Specifications */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-                Seating Capacity / Type
-              </label>
-              <input
-                type="text"
-                value={seating}
-                onChange={(e) => setSeating(e.target.value)}
-                placeholder="3-Seater / L-Shaped / Accent"
-                style={{
-                  width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                  border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-                }}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-                Custom Dimensions
-              </label>
-              <input
-                type="text"
-                value={dimensions}
-                onChange={(e) => setDimensions(e.target.value)}
-                placeholder="220cm W × 95cm D × 80cm H"
-                style={{
-                  width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                  border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-                }}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-                Material &amp; Fabric Preference
-              </label>
-              <input
-                type="text"
-                value={material}
-                onChange={(e) => setMaterial(e.target.value)}
-                placeholder="Kiln-Dried Teak, Linen, Velvet..."
-                style={{
-                  width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                  border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-                }}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-                Color / Palette Tone
-              </label>
-              <input
-                type="text"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                placeholder="Warm Ivory, Moss, Walnut..."
-                style={{
-                  width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                  border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-                }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-              Target Budget Range
-            </label>
-            <input
-              type="text"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-              placeholder="₹75,000 – ₹1,50,000"
-              style={{
-                width: '100%', height: 40, padding: '0 12px', borderRadius: 8,
-                border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13,
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#44403c', marginBottom: 4 }}>
-              Architectural Room Notes &amp; Special Constraints
-            </label>
-            <textarea
-              rows={3}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="E.g. Lift size constraints, left chaise orientation, brass feet accents, pet-resistant fabric..."
-              style={{
-                width: '100%', padding: 10, borderRadius: 8,
-                border: '1px solid #e7e5e4', background: '#fafaf9', fontSize: 13, resize: 'none',
-              }}
-            />
-          </div>
-
-          {/* LIVE PRE-LOADED WHATSAPP MESSAGE PREVIEW */}
-          <div style={{
-            background: 'rgba(120, 99, 78, 0.08)', borderRadius: 10, padding: 14,
-            border: '1px solid rgba(120, 99, 78, 0.25)', marginTop: 4,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: '#5e4b39', textTransform: 'uppercase' }}>
-                ✓ Pre-Loaded WhatsApp Message Preview
+            {statusMsg && !submitOk ? (
+              <div className="custom-request-alert" role="status">
+                {statusMsg}
               </div>
-              <span style={{ fontSize: 11, color: '#78634e', fontWeight: 600 }}>CouchKraft: +91 63607 04340</span>
-            </div>
-            <pre style={{
-              margin: 0, fontSize: 11, color: '#1c1917', background: '#fff',
-              padding: 10, borderRadius: 6, border: '1px solid #e7e5e4',
-              whiteSpace: 'pre-wrap', fontFamily: 'inherit', lineHeight: 1.45, maxHeight: 120, overflowY: 'auto',
-            }}>
-              {buildCustomFurnitureWhatsAppMessage({
-                productName: pieceName || (product ? product.name : 'Custom Furniture Piece'),
-                productUrl: typeof window !== 'undefined' ? window.location.href : '',
-                clientName: name || '[Your Name]',
-                clientPhone: phone || '[Your Phone]',
-                seating,
-                dimensions,
-                material,
-                color,
-                budget,
-                notes,
-              })}
-            </pre>
-          </div>
+            ) : null}
 
-          <div style={{ marginTop: 8 }}>
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                width: '100%', padding: '12px 20px', borderRadius: 8, border: 'none',
-                background: '#29241f', color: '#fff', fontSize: 14, fontWeight: 600,
-                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                gap: 8, boxShadow: '0 4px 14px rgba(41,36,31,0.18)',
-              }}
-            >
-              <span style={{ fontSize: 18 }}>💬</span>
-              {loading ? 'Submitting to Atelier...' : 'Submit & Connect on WhatsApp'}
-            </button>
-            <p style={{ textAlign: 'center', fontSize: 11, color: '#78716c', marginTop: 8 }}>
-              This is a bespoke enquiry and consultation flow, not an immediate payment or charge.
-            </p>
-          </div>
-        </form>
+            <form onSubmit={handleSubmit} className="custom-request-form">
+              <div>
+                <label style={fieldLabel}>What do you want?</label>
+                <input
+                  type="text"
+                  value={pieceName}
+                  onChange={(e) => setPieceName(e.target.value)}
+                  placeholder="e.g. Dining table, 3-seater sofa"
+                  style={fieldInput}
+                />
+              </div>
+
+              <div className="custom-request-form-row">
+                <div>
+                  <label style={fieldLabel}>Your name</label>
+                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="First name" style={fieldInput} />
+                </div>
+                <div>
+                  <label style={fieldLabel}>Phone number *</label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="98765 43210"
+                    required
+                    style={fieldInput}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={fieldLabel}>Email (optional)</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  style={fieldInput}
+                />
+              </div>
+
+              <div>
+                <label style={fieldLabel}>Size</label>
+                <input
+                  type="text"
+                  value={size}
+                  onChange={(e) => setSize(e.target.value)}
+                  placeholder="e.g. 3-seater, or 200 cm wide × 90 cm deep"
+                  style={fieldInput}
+                />
+              </div>
+
+              <div>
+                <label style={fieldLabel}>Wood, fabric &amp; colour</label>
+                <input
+                  type="text"
+                  value={look}
+                  onChange={(e) => setLook(e.target.value)}
+                  placeholder="e.g. Teak wood, beige linen"
+                  style={fieldInput}
+                />
+              </div>
+
+              <div>
+                <label style={fieldLabel}>Budget (optional)</label>
+                <input
+                  type="text"
+                  value={budget}
+                  onChange={(e) => setBudget(e.target.value)}
+                  placeholder="e.g. ₹75,000 – ₹1,50,000"
+                  style={fieldInput}
+                />
+              </div>
+
+              <div>
+                <label style={fieldLabel}>Reference photos (optional)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    handleImagePick(e.target.files)
+                    e.target.value = ''
+                  }}
+                  style={{ ...fieldInput, height: 'auto', padding: 8 }}
+                />
+                <p className="custom-request-upload-hint">Up to {MAX_IMAGES} images, 2.5 MB each — stored securely, not as embedded data.</p>
+                {imageError ? <p className="custom-request-field-error">{imageError}</p> : null}
+                {pendingImages.length > 0 ? (
+                  <div className="custom-request-thumbs">
+                    {pendingImages.map((item) => (
+                      <div key={item.id} className="custom-request-thumb">
+                        <img src={item.preview} alt="" />
+                        <button type="button" aria-label="Remove image" onClick={() => removePendingImage(item.id)}>
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div>
+                <label style={fieldLabel}>Anything else? (optional)</label>
+                <textarea
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Room photos, delivery date, lift size, etc."
+                  style={{
+                    ...fieldInput,
+                    height: 'auto',
+                    padding: 10,
+                    resize: 'none',
+                  }}
+                />
+              </div>
+
+              <button type="submit" disabled={loading} className="custom-request-btn primary custom-request-submit">
+                {loading ? 'Submitting…' : user ? 'Submit custom request' : 'Sign in & submit'}
+              </button>
+            </form>
+          </>
+        )}
       </div>
     </div>
   )

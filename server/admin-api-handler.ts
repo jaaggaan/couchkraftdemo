@@ -1,5 +1,5 @@
 import { readSettings, writeSettings } from './settings-store.ts'
-import { readCustomRequests, updateCustomRequestStatus } from './custom-request-store.ts'
+import { listAllCustomRequests, updateCustomRequestStatus } from './custom-request-store.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -17,6 +17,7 @@ import {
   findProductById,
   createProduct,
   updateProduct,
+  setFestiveDiscountForProducts,
   deleteProduct,
   readCategories,
   createCategory,
@@ -26,6 +27,7 @@ import {
 import {
   readCoupons,
   createCoupon,
+  createPersonalCoupon,
   updateCoupon,
   deleteCoupon,
   readBanners,
@@ -34,7 +36,20 @@ import {
   deleteBanner,
 } from './marketing-store.ts'
 import { dataDirectory } from './data-path.ts'
-import type { Order } from './order-store.ts'
+import { listAllOrders, nextTrackingNumber, normaliseOrder as normaliseOrderRow } from './order-store.ts'
+import { supabase } from './supabase-client.ts'
+
+const IST = 'Asia/Kolkata'
+
+function calendarDayInZone(iso: string, timeZone = IST) {
+  const stamp = new Date(iso)
+  if (Number.isNaN(stamp.getTime())) return ''
+  return stamp.toLocaleDateString('en-CA', { timeZone })
+}
+
+function paidOrderTotal(order: { paymentStatus: string; total: number }) {
+  return order.paymentStatus === 'paid' ? order.total : 0
+}
 import type { Customer } from './auth-store.ts'
 
 const ADMIN_COOKIE = 'ck_admin_session'
@@ -87,21 +102,6 @@ export function currentAdmin(req: IncomingMessage) {
   }
 
   return null
-}
-
-function readAllOrders(): Order[] {
-  try {
-    const p = resolve(dataDirectory(), 'orders.json')
-    if (existsSync(p)) {
-      return JSON.parse(readFileSync(p, 'utf8')) as Order[]
-    }
-  } catch {}
-  return []
-}
-
-function writeAllOrders(orders: Order[]) {
-  const p = resolve(dataDirectory(), 'orders.json')
-  writeFileSync(p, JSON.stringify(orders, null, 2), 'utf8')
 }
 
 function readAllCustomers(): Customer[] {
@@ -172,36 +172,70 @@ export async function handleAdminApi(
 
   // 3. DASHBOARD METRICS & TELEMETRY
   if (req.method === 'GET' && url === '/api/admin/dashboard/stats') {
-    const orders = readAllOrders()
-    const customers = readAllCustomers()
+    const orders = await listAllOrders()
     const products = await readProducts()
+    const customRequests = await listAllCustomRequests()
 
-    const todayStr = new Date().toISOString().split('T')[0]
-    const todayOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(todayStr))
-    const todaySales = todayOrders.reduce((sum, o) => sum + (o.paymentStatus === 'paid' ? o.total : 0), 0)
+    const todayIst = calendarDayInZone(new Date().toISOString())
+    const monthIst = todayIst.slice(0, 7)
 
-    const thisMonthStr = todayStr.slice(0, 7)
-    const monthOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(thisMonthStr))
-    const monthSales = monthOrders.reduce((sum, o) => sum + (o.paymentStatus === 'paid' ? o.total : 0), 0)
-    const totalRevenue = orders.reduce((sum, o) => sum + (o.paymentStatus === 'paid' ? o.total : 0), 0)
+    const todayOrders = orders.filter((o) => o.createdAt && calendarDayInZone(o.createdAt) === todayIst)
+    const monthOrders = orders.filter((o) => {
+      const day = calendarDayInZone(o.createdAt)
+      return day && day.startsWith(monthIst)
+    })
+
+    const todaySales = todayOrders.reduce((sum, o) => sum + paidOrderTotal(o), 0)
+    const monthlySales = monthOrders.reduce((sum, o) => sum + paidOrderTotal(o), 0)
+    const totalRevenue = orders.reduce((sum, o) => sum + paidOrderTotal(o), 0)
 
     const pendingOrders = orders.filter((o) => o.fulfilmentStatus !== 'delivered').length
     const deliveredOrders = orders.filter((o) => o.fulfilmentStatus === 'delivered').length
-    const lowStockProducts = products.filter((p) => p.readyToShipStock <= p.lowStockThreshold)
+    const lowStockProducts = products.filter(
+      (p) => !p.madeToOrder && p.status !== 'archived' && p.readyToShipStock <= p.lowStockThreshold,
+    )
+
+    const { data: customerRows, error: customerCountError } = await supabase.from('customers').select('id')
+    if (customerCountError) {
+      console.warn('[AdminDashboard] customer count error:', customerCountError.message)
+    }
+    const customersFromOrders = new Set(orders.map((o) => o.customerId).filter(Boolean)).size
+    const customerCount = Math.max(customerRows?.length ?? 0, customersFromOrders, readAllCustomers().length)
+
+    const pendingEnquiriesCount = customRequests.filter((r) => r.status === 'new' || r.status === 'under_review').length
+    const approvedAwaitingPayment = customRequests.filter(
+      (r) =>
+        r.status === 'approved' &&
+        r.paymentStatus !== 'paid' &&
+        Number(r.quoteAmount) > 0,
+    )
+    const recentApprovedCommissions = customRequests
+      .filter((r) => r.status === 'approved')
+      .slice(0, 8)
+      .map((r) => ({
+        id: r.id,
+        productName: r.productName,
+        customerName: r.customerName,
+        quoteAmount: r.quoteAmount,
+        paymentStatus: r.paymentStatus || 'none',
+        updatedAt: r.updatedAt,
+      }))
 
     return send(res, 200, {
       todaySales,
       todayOrdersCount: todayOrders.length,
-      monthlySales: monthSales,
+      monthlySales,
       totalRevenue,
       totalOrders: orders.length,
       pendingOrders,
       deliveredOrders,
-      customerCount: customers.length,
+      customerCount,
       totalProducts: products.length,
       lowStockCount: lowStockProducts.length,
       lowStockProducts: lowStockProducts.slice(0, 5),
-      pendingEnquiriesCount: 3, // Customization inquiries telemetry
+      pendingEnquiriesCount,
+      approvedAwaitingPaymentCount: approvedAwaitingPayment.length,
+      recentApprovedCommissions,
       recentOrders: orders.slice(0, 6),
       recentAudit: getAuditLogs(5),
     })
@@ -214,6 +248,55 @@ export async function handleAdminApi(
       return send(res, 200, { products })
     } catch (err: any) {
       return send(res, 500, { error: err.message || 'Failed to fetch products from Supabase.' })
+    }
+  }
+
+  if (req.method === 'POST' && url === '/api/admin/products/festive-discount') {
+    try {
+      const action = String(body.action || 'apply')
+      const scope = body.scope === 'all' ? 'all' : 'one'
+      const productId = typeof body.productId === 'string' ? body.productId : undefined
+      if (action === 'remove') {
+        const result = await setFestiveDiscountForProducts({ percent: null, scope, productId })
+        logAdminAction({
+          adminId: admin.id,
+          adminName: admin.name,
+          action: 'remove_festive_discount',
+          targetType: 'product',
+          targetId: scope === 'all' ? 'all' : productId || '',
+          details: { scope, updatedCount: result.updatedCount },
+        })
+        return send(res, 200, {
+          ok: true,
+          message: scope === 'all' ? 'Festive discount removed from all products.' : 'Festive discount removed for this product.',
+          updatedCount: result.updatedCount,
+        })
+      }
+      const percent = Number(body.percent)
+      if (!Number.isFinite(percent) || percent < 1 || percent > 100) {
+        return send(res, 400, { error: 'Enter a discount between 1 and 100 percent.' })
+      }
+      const discountType = body.discountType === 'standard' ? 'standard' : 'festive'
+      const result = await setFestiveDiscountForProducts({ percent, scope, productId, discountType })
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: 'apply_festive_discount',
+        targetType: 'product',
+        targetId: scope === 'all' ? 'all' : productId || '',
+        details: { scope, percent, updatedCount: result.updatedCount },
+      })
+      return send(res, 200, {
+        ok: true,
+        message:
+          scope === 'all'
+            ? `Festive ${percent}% discount applied to ${result.updatedCount} products.`
+            : `Festive ${percent}% discount applied to this product.`,
+        updatedCount: result.updatedCount,
+        percent,
+      })
+    } catch (err: any) {
+      return send(res, 500, { error: err.message || 'Could not update festive discount.' })
     }
   }
 
@@ -345,6 +428,34 @@ export async function handleAdminApi(
     return send(res, 200, { coupons: readCoupons() })
   }
 
+  if (req.method === 'POST' && url === '/api/admin/coupons/personal') {
+    const customerId = String(body.customerId || '').trim()
+    const customerName = String(body.customerName || body.name || 'Customer').trim()
+    const customerEmail = String(body.customerEmail || body.email || '').trim().toLowerCase()
+    if (!customerId || !customerEmail) {
+      return send(res, 400, { error: 'customerId and customerEmail are required.' })
+    }
+    const created = createPersonalCoupon({
+      customerId,
+      customerName,
+      customerEmail,
+      type: body.type === 'flat' ? 'flat' : 'percent',
+      value: Number(body.value) || 12,
+      minOrderValue: Number(body.minOrderValue) || 15000,
+      description: String(body.description || `Personal offer for ${customerName}`),
+      source: 'admin',
+    })
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: 'create_personal_coupon',
+      targetType: 'coupon',
+      targetId: created.id,
+      details: { code: created.code, customerEmail },
+    })
+    return send(res, 201, { coupon: created, message: 'Personal coupon issued.' })
+  }
+
   if (req.method === 'POST' && url === '/api/admin/coupons') {
     const created = createCoupon(body)
     logAdminAction({
@@ -400,45 +511,92 @@ export async function handleAdminApi(
 
   // 9. ORDERS MANAGEMENT
   if (req.method === 'GET' && url === '/api/admin/orders') {
-    const orders = readAllOrders()
+    const orders = await listAllOrders()
+    for (const order of orders) {
+      if (!order.trackingNumber) {
+        const tracking = nextTrackingNumber(order)
+        const estimated = order.estimatedDelivery || order.createdAt
+        await supabase
+          .from('orders')
+          .update({ tracking_number: tracking, estimated_delivery: estimated, updated_at: new Date().toISOString() })
+          .eq('id', order.id)
+        order.trackingNumber = tracking
+        order.estimatedDelivery = estimated
+      }
+    }
     return send(res, 200, { orders })
   }
 
   const orderStatusMatch = url.match(/^\/api\/admin\/orders\/([^/]+)\/status$/)
   if (orderStatusMatch && req.method === 'PUT') {
-    const orderId = orderStatusMatch[1]
-    const orders = readAllOrders()
-    const idx = orders.findIndex((o) => o.id === orderId || o.number === orderId)
-    if (idx === -1) return send(res, 404, { error: 'Order not found.' })
-
-    const fulfilmentStatus = String(body.fulfilmentStatus || orders[idx].fulfilmentStatus)
-    const paymentStatus = String(body.paymentStatus || orders[idx].paymentStatus)
-    const trackingNumber = body.trackingNumber !== undefined ? String(body.trackingNumber) : orders[idx].trackingNumber
-
-    orders[idx] = {
-      ...orders[idx],
-      fulfilmentStatus: fulfilmentStatus as any,
-      paymentStatus: paymentStatus as any,
-      trackingNumber,
+    if (admin.role === 'editor') {
+      return send(res, 403, { error: 'Your admin role cannot update order status.' })
     }
-    writeAllOrders(orders)
+    const orderId = orderStatusMatch[1]
+    const fulfilmentStatus = String(body.fulfilmentStatus || 'placed')
+    const allowedFulfilment = ['placed', 'confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered']
+    if (body.paymentStatus !== undefined) {
+      return send(res, 400, { error: 'Payment status can only be changed by verified payment processing.' })
+    }
+    if (!allowedFulfilment.includes(fulfilmentStatus)) {
+      return send(res, 400, { error: 'Invalid fulfilment status.' })
+    }
+    const { data: existingRow } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle()
+    let existingOrder = existingRow ? normaliseOrderRow(existingRow) : null
+    if (!existingOrder) {
+      const byNum = await supabase.from('orders').select('*').eq('number', orderId).maybeSingle()
+      if (byNum.data) existingOrder = normaliseOrderRow(byNum.data)
+    }
+    if (!existingOrder) return send(res, 404, { error: 'Order not found.' })
+    const existingOrderResolved = existingOrder
+    const trackingNumber =
+      String(body.trackingNumber || '').trim() ||
+      existingOrderResolved.trackingNumber ||
+      nextTrackingNumber(existingOrderResolved)
+    const estimatedDelivery =
+      existingOrderResolved.estimatedDelivery || existingOrderResolved.createdAt
+    const patch: Record<string, unknown> = {
+      fulfilment_status: fulfilmentStatus,
+      tracking_number: trackingNumber,
+      estimated_delivery: estimatedDelivery,
+      updated_at: new Date().toISOString(),
+    }
+    const byId = await supabase
+      .from('orders')
+      .update(patch)
+      .eq('id', orderId)
+      .select('*')
+      .maybeSingle()
+    let updated = byId.data
+    if (byId.error) return send(res, 400, { error: `Could not update order: ${byId.error.message}` })
+    if (!updated) {
+      const byNumber = await supabase
+        .from('orders')
+        .update(patch)
+        .eq('number', orderId)
+        .select('*')
+        .maybeSingle()
+      if (byNumber.error) return send(res, 400, { error: `Could not update order: ${byNumber.error.message}` })
+      updated = byNumber.data
+    }
+    if (!updated) return send(res, 404, { error: 'Order not found.' })
 
     logAdminAction({
       adminId: admin.id,
       adminName: admin.name,
       action: 'update_order_status',
       targetType: 'order',
-      targetId: orders[idx].id,
-      details: { orderNumber: orders[idx].number, fulfilmentStatus, paymentStatus },
+      targetId: updated.id,
+      details: { orderNumber: updated.number, fulfilmentStatus, trackingNumber },
     })
 
-    return send(res, 200, { order: orders[idx], message: 'Order status updated.' })
+    return send(res, 200, { order: normaliseOrderRow(updated), message: 'Order status updated.' })
   }
 
   // 10. CUSTOMERS MANAGEMENT
   if (req.method === 'GET' && url === '/api/admin/customers') {
     const customers = readAllCustomers()
-    const orders = readAllOrders()
+    const orders = await listAllOrders()
     const safeCustomers = customers.map((c) => {
       const customerOrders = orders.filter((o) => o.customerId === c.id)
       const totalSpent = customerOrders.reduce((sum, o) => sum + (o.paymentStatus === 'paid' ? o.total : 0), 0)
@@ -457,10 +615,14 @@ export async function handleAdminApi(
     return send(res, 200, { customers: safeCustomers })
   }
 
-  // 11. IMAGE UPLOAD
+  // 11. IMAGE UPLOAD (service-role Supabase storage; bypasses browser Storage RLS)
   if (req.method === 'POST' && url === '/api/admin/upload') {
     const dataUri = String(body.dataUri || '')
     const fileName = String(body.fileName || `asset_${Date.now()}.png`).replace(/[^a-zA-Z0-9_.-]/g, '_')
+    const bucket = String(body.bucket || 'products').replace(/[^a-zA-Z0-9_-]/g, '')
+    const objectPath = String(body.objectPath || fileName).replace(/^\/+/, '')
+    const upsert = body.upsert === true
+
     if (!dataUri.startsWith('data:image/')) {
       return send(res, 400, { error: 'Invalid image format. Expected base64 data URI.' })
     }
@@ -475,6 +637,29 @@ export async function handleAdminApi(
       return send(res, 400, { error: 'Image exceeds 10MB limit.' })
     }
 
+    const contentType = matches[1] === 'jpeg' ? 'image/jpeg' : `image/${matches[1]}`
+
+    const { error: storageError } = await supabase.storage.from(bucket).upload(objectPath, buffer, {
+      contentType,
+      upsert,
+      cacheControl: '3600',
+    })
+
+    if (!storageError) {
+      const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(objectPath)
+      const supabaseUrl = publicData.publicUrl
+        || `${String(process.env.SUPABASE_URL || '').replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${objectPath}`
+      return send(res, 200, {
+        url: supabaseUrl,
+        size: buffer.length,
+        name: objectPath,
+        bucket,
+        source: 'supabase',
+      })
+    }
+
+    console.warn('[AdminUpload] Supabase storage upload failed:', storageError.message)
+
     const publicUploads = resolve(process.cwd(), 'public', 'uploads')
     if (!existsSync(publicUploads)) mkdirSync(publicUploads, { recursive: true })
 
@@ -485,6 +670,8 @@ export async function handleAdminApi(
       url: `/uploads/${finalName}`,
       size: buffer.length,
       name: finalName,
+      source: 'local',
+      warning: storageError.message,
     })
   }
 
@@ -520,16 +707,24 @@ export async function handleAdminApi(
 
   // 14. CUSTOMIZATION BESPOKE REQUESTS
   if (req.method === 'GET' && url === '/api/admin/custom-requests') {
-    return send(res, 200, { requests: readCustomRequests() })
+    return send(res, 200, { requests: await listAllCustomRequests() })
   }
 
   const reqMatch = url.match(/^\/api\/admin\/custom-requests\/([^/]+)$/)
   if (reqMatch) {
     const reqId = reqMatch[1]
     if (req.method === 'PUT') {
+      let quoteAmount: number | null | undefined
+      if (body.quoteAmount === null || body.quoteAmount === '') quoteAmount = null
+      else if (typeof body.quoteAmount === 'number') quoteAmount = body.quoteAmount
+      else if (typeof body.quoteAmount === 'string' && body.quoteAmount.trim()) {
+        const n = Number(body.quoteAmount)
+        quoteAmount = Number.isFinite(n) ? n : null
+      }
       const updated = await updateCustomRequestStatus(reqId, {
         status: body.status as any,
         adminNotes: typeof body.adminNotes === 'string' ? body.adminNotes : undefined,
+        quoteAmount,
       })
       if (!updated) return send(res, 404, { error: 'Custom request not found.' })
       logAdminAction({

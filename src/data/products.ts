@@ -68,6 +68,10 @@ export type Product = {
   name: string
   price: number
   compareAt?: number
+  /** Admin “festive / additional” % off selling price (1–100). */
+  festiveDiscountPercent?: number
+  /** Label style on storefront: festive vs normal special offer. */
+  extraDiscountType?: 'festive' | 'standard'
   description: string
   category: string
   space: ProductSpace

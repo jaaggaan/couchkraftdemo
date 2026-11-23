@@ -43,6 +43,7 @@ export function OrderDetail() {
       <h2>{order.number}</h2>
       <p className="form-note">{formatDate(order.createdAt)}</p>
 
+      <p className="form-note">Order received is automatic; shipping and delivery steps are confirmed by CouchKraft admin.</p>
       <ol className="order-timeline">
         {FULFILMENT_STEPS.map((step, index) => (
           <li key={step.id} className={index <= current ? 'is-done' : undefined}>

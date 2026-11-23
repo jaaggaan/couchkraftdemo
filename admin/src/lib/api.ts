@@ -10,9 +10,17 @@ async function backendRequest<T>(url: string, opts: RequestInit = {}): Promise<T
   }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(url, { ...opts, headers })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || 'Request failed')
+  const res = await fetch(url, { cache: 'no-store', ...opts, headers })
+  const raw = await res.text()
+  let data: Record<string, unknown> = {}
+  if (raw) {
+    try {
+      data = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      throw new Error(raw.trim() || `Request failed (${res.status})`)
+    }
+  }
+  if (!res.ok) throw new Error(String(data.error || `Request failed (${res.status})`))
   return data as T
 }
 
@@ -83,6 +91,15 @@ function toProductDbRow(p: any): Record<string, any> {
     status: p.status || 'published',
     gst_slab: p.gstSlab ?? p.gst_slab ?? '18% GST (Standard Furniture)',
     hsn_code: p.hsnCode ?? p.hsn_code ?? '9403 6000',
+    festive_discount_percent: Math.min(
+      100,
+      Math.max(0, Math.round(Number(p.festiveDiscountPercent ?? p.festive_discount_percent) || 0)),
+    ),
+    extra_discount_type: (() => {
+      const n = Math.round(Number(p.festiveDiscountPercent ?? p.festive_discount_percent) || 0)
+      if (n <= 0) return null
+      return p.extraDiscountType === 'standard' || p.extra_discount_type === 'standard' ? 'standard' : 'festive'
+    })(),
   }
 }
 
@@ -112,6 +129,8 @@ function fromProductDbRow(row: any): Record<string, any> {
     gstSlab: row.gst_slab ?? row.gstSlab ?? '18% GST (Standard Furniture)',
     hsnCode: row.hsn_code ?? row.hsnCode ?? '9403 6000',
     categoryId: row.category_id ?? row.categoryId ?? 'cat_sofas',
+    festiveDiscountPercent: Number(row.festive_discount_percent ?? row.festiveDiscountPercent) || 0,
+    extraDiscountType: row.extra_discount_type === 'standard' ? 'standard' : 'festive',
   }
 }
 function normalizeOrder(o: any) {
@@ -146,77 +165,20 @@ export const adminApi = {
   logout: () => backendRequest(`${BASE}/auth/logout`, { method: 'POST' }),
   me: () => backendRequest<{ admin: any }>(`${BASE}/auth/me`),
 
-  dashboardStats: async () => {
-    try {
-      const [prodsRes, catsRes, ordersRes, custRes] = await Promise.all([
-        supabase.from('products').select('*'),
-        supabase.from('categories').select('*'),
-        supabase.from('orders').select('*').order('created_at', { ascending: false }),
-        supabase.from('customers').select('*'),
-      ])
+  dashboardStats: () =>
+    backendRequest<any>(`${BASE}/dashboard/stats?t=${Date.now()}`),
 
-      const pList = prodsRes.data || []
-      const rawOrders = ordersRes.data || []
-      const oList = rawOrders.map(normalizeOrder)
-      const cList = custRes.data || []
-
-      // Calculate today and month using Indian Standard Time (IST = UTC + 5:30)
-      const istOffsetMs = 5.5 * 60 * 60 * 1000
-      const istNow = new Date(Date.now() + istOffsetMs)
-      const istYear = istNow.getUTCFullYear()
-      const istMonth = istNow.getUTCMonth()
-      const istDate = istNow.getUTCDate()
-      const todayStart = Date.UTC(istYear, istMonth, istDate) - istOffsetMs
-      const monthStart = Date.UTC(istYear, istMonth, 1) - istOffsetMs
-
-      // Calculate qualifying paid orders (separating live orders from test payments)
-      const paidOrders = oList.filter((o: any) => o.paymentStatus === 'paid')
-      const livePaidOrders = paidOrders.filter((o: any) => o.paymentMethod !== 'demo' && !o.razorpayPaymentId?.startsWith('pay_demo_'))
-      const revenueSource = livePaidOrders.length > 0 ? livePaidOrders : paidOrders
-
-      const todayOrders = revenueSource.filter((o: any) => {
-        const t = new Date(o.createdAt).getTime()
-        return t >= todayStart
-      })
-
-      const monthOrders = revenueSource.filter((o: any) => {
-        const t = new Date(o.createdAt).getTime()
-        return t >= monthStart
-      })
-
-      const todaySales = todayOrders.reduce((sum: number, o: any) => sum + (Number(o.total) || 0), 0)
-      const monthlySales = monthOrders.reduce((sum: number, o: any) => sum + (Number(o.total) || 0), 0)
-      const totalRevenue = revenueSource.reduce((sum: number, o: any) => sum + (Number(o.total) || 0), 0)
-
-      const totalOrders = oList.length
-      const deliveredOrders = oList.filter((o: any) => o.fulfilmentStatus === 'delivered').length
-      const pendingOrders = oList.filter((o: any) => o.fulfilmentStatus !== 'delivered').length
-
-      const lowStockCount = pList.filter((p: any) => {
-        const stock = Number(p.ready_to_ship_stock ?? p.readyToShipStock) || 0
-        const thresh = Number(p.low_stock_threshold ?? p.lowStockThreshold) || 2
-        return stock <= thresh
-      }).length
-
-      return {
-        todaySales,
-        todayOrdersCount: todayOrders.length,
-        monthlySales,
-        totalRevenue,
-        totalOrders,
-        deliveredOrders,
-        pendingOrders,
-        customerCount: cList.length,
-        totalProducts: pList.length,
-        lowStockCount,
-        pendingEnquiriesCount: 0,
-        recentOrders: oList.slice(0, 10),
-        categoriesCount: (catsRes.data || []).length,
-      }
-    } catch {
-      return backendRequest<any>(`${BASE}/dashboard/stats`)
-    }
-  },
+  uploadImage: (payload: {
+    dataUri: string
+    fileName: string
+    objectPath: string
+    bucket?: string
+    upsert?: boolean
+  }) =>
+    backendRequest<{ url: string; source?: string; warning?: string }>(`${BASE}/upload`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   getProducts: async () => {
     try {
@@ -253,6 +215,18 @@ export const adminApi = {
     }
     return backendRequest(`${BASE}/products`, { method: 'POST', body: JSON.stringify(data) })
   },
+
+  setFestiveDiscount: (payload: {
+    action: 'apply' | 'remove'
+    percent?: number
+    scope: 'one' | 'all'
+    productId?: string
+    discountType?: 'festive' | 'standard'
+  }) =>
+    backendRequest<{ ok: boolean; message: string; updatedCount: number; percent?: number }>(
+      `${BASE}/products/festive-discount`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
 
   updateProduct: async (id: string, data: any) => {
     const row = toProductDbRow({ ...data, id })
@@ -370,24 +344,21 @@ export const adminApi = {
     return backendRequest<{ inventory: any[] }>(`${BASE}/inventory`)
   },
 
-  getCoupons: async () => {
-    try {
-      const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false })
-      if (!error && data && data.length) {
-        return {
-          coupons: data.map((c: any) => ({
-            ...c,
-            minOrderValue: Number(c.min_order_value ?? c.minOrderValue) || 0,
-            maxDiscount: c.max_discount ?? c.maxDiscount ?? null,
-            startDate: c.start_date ?? c.startDate,
-            endDate: c.end_date ?? c.endDate,
-            usedCount: Number(c.used_count ?? c.usedCount) || 0,
-          }))
-        }
-      }
-    } catch {}
-    return backendRequest<{ coupons: any[] }>(`${BASE}/coupons`)
-  },
+  getCoupons: async () => backendRequest<{ coupons: any[] }>(`${BASE}/coupons`),
+
+  createPersonalCoupon: async (data: {
+    customerId: string
+    customerName: string
+    customerEmail: string
+    value?: number
+    type?: string
+    minOrderValue?: number
+    description?: string
+  }) =>
+    backendRequest(`${BASE}/coupons/personal`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   createCoupon: async (data: any) => {
     try {
@@ -526,38 +497,26 @@ export const adminApi = {
   },
 
   getOrders: async () => {
-    try {
-      const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false })
-      if (!error && data && data.length) {
-        return { orders: data.map(normalizeOrder) }
-      }
-    } catch {}
-    return backendRequest<{ orders: any[] }>(`${BASE}/orders`)
+    const result = await backendRequest<{ orders: any[] }>(`${BASE}/orders`)
+    return { orders: result.orders.map(normalizeOrder) }
   },
 
   updateOrderStatus: async (id: string, data: any) => {
-    try {
-      const row: Record<string, any> = { updated_at: new Date().toISOString() }
-      if (data.paymentStatus) row.payment_status = data.paymentStatus
-      if (data.fulfilmentStatus) row.fulfilment_status = data.fulfilmentStatus
-      if (data.trackingNumber !== undefined) row.tracking_number = data.trackingNumber
-
-      const { data: updated, error } = await supabase.from('orders').update(row).eq('id', id).select()
-      if (!error && updated && updated.length) {
-        return { order: normalizeOrder(updated[0]) }
-      }
-    } catch {}
-    return backendRequest<{ order: any }>(`${BASE}/orders/${id}/status`, { method: 'PUT', body: JSON.stringify(data) })
+    const result = await backendRequest<{ order: any }>(`${BASE}/orders/${id}/status`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+    return { order: normalizeOrder(result.order) }
   },
 
   getCustomers: async () => {
     try {
       const [custRes, ordRes] = await Promise.all([
         supabase.from('customers').select('*').order('created_at', { ascending: false }),
-        supabase.from('orders').select('*'),
+        backendRequest<{ orders: any[] }>(`${BASE}/orders`),
       ])
       const cList = custRes.data || []
-      const oList = (ordRes.data || []).map(normalizeOrder)
+      const oList = ordRes.orders.map(normalizeOrder)
 
       return {
         customers: cList.map((c: any) => {

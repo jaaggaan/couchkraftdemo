@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../lib/auth-api'
 import { CloseIcon, EyeIcon, EyeOffIcon } from './Icons'
+import { clearAuthPromoFlag, readAuthPromoFlag } from './WelcomeSignInPromo'
 
 type FieldErrors = Record<string, string>
 
@@ -100,7 +101,11 @@ export function AuthModal() {
       setPassword('')
       setConfirmPassword('')
       openAuth('verify')
-      setFormSuccess('Account created! Please enter your verification code below.')
+      const couponNote = result.welcomeCoupon?.code
+        ? ` Your personal coupon is ${result.welcomeCoupon.code} (unused until checkout).`
+        : ''
+      setFormSuccess(`Account created! Please enter your verification code below.${couponNote}`)
+      clearAuthPromoFlag()
       return
     }
     setFormError(result.error || 'Unable to create this account.')
@@ -260,6 +265,11 @@ export function AuthModal() {
           <>
             <h2 id={titleId}>Create an account</h2>
             <p className="auth-lead">Save pieces you love and keep your orders in one place.</p>
+            {readAuthPromoFlag() ? (
+              <p className="welcome-coupon-promo-note">
+                Sign up now — we&apos;ll create a <strong>personal coupon ID</strong> for your account (track used / unused under Account).
+              </p>
+            ) : null}
             <form
               onSubmit={(event) => {
                 event.preventDefault()

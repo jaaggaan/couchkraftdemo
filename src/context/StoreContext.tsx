@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { products as initialProducts, type Product } from '../data/products'
 import { DEMO_COUPON } from '../data/site'
+import { effectiveSellingPrice } from '../lib/product-pricing'
 import { supabase } from '../lib/supabase'
 
 import type { SelectedCustomization } from '../data/products'
@@ -70,6 +71,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               name: row.name,
               price: Number(row.price) || 0,
               compareAt: row.compare_at ? Number(row.compare_at) : undefined,
+              festiveDiscountPercent: Number(row.festive_discount_percent ?? row.festiveDiscountPercent) || 0,
+              extraDiscountType: row.extra_discount_type === 'standard' ? 'standard' : 'festive',
               description: row.description || '',
               category: row.category || 'Standard',
               space: row.space || 'living',
@@ -86,6 +89,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               customizationOptions: row.customization_options ?? row.customizationOptions,
             }))
             setLiveProducts(mapped)
+            setCart((current) => {
+              if (!current.length) return current
+              let changed = false
+              const next = current
+                .map((item) => {
+                  const product = mapped.find((p) => p.id === item.productId)
+                  if (!product) {
+                    changed = true
+                    return null
+                  }
+                  if (product.madeToOrder) return item
+                  const stock = product.readyToShipStock ?? 0
+                  if (stock <= 0) {
+                    changed = true
+                    return null
+                  }
+                  if (item.quantity > stock) {
+                    changed = true
+                    return { ...item, quantity: stock }
+                  }
+                  return item
+                })
+                .filter((item): item is CartItem => item != null)
+              return changed ? next : current
+            })
           }
         })
     }
@@ -93,14 +121,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     fetchLiveProducts()
     window.addEventListener('focus', fetchLiveProducts)
 
-    // Fetch active coupons from Supabase
-    supabase
-      .from('coupons')
-      .select('*')
-      .eq('active', true)
-      .then(({ data }) => {
-        if (data && data.length) setCoupons(data)
+    fetch('/api/coupons')
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload: { coupons?: any[] } | null) => {
+        if (payload?.coupons?.length) setCoupons(payload.coupons)
       })
+      .catch(() => undefined)
 
     return () => {
       window.removeEventListener('focus', fetchLiveProducts)
@@ -121,7 +147,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const product = liveProducts.find((p) => p.id === item.productId) || initialProducts.find((p) => p.id === item.productId)
         if (!product) return sum
         const delta = item.customization?.totalCustomizationDelta || 0
-        const unitPrice = item.customUnitPrice ?? (product.price + delta)
+        const base = effectiveSellingPrice(product.price, product.festiveDiscountPercent)
+        const unitPrice = item.customUnitPrice ?? base + delta
         return sum + unitPrice * item.quantity
       }, 0),
     [cart, liveProducts],
@@ -163,7 +190,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
           const chosenFinish = finish ?? product?.finishes[0] ?? 'Standard'
           const delta = customization?.totalCustomizationDelta || 0
-          const unitPrice = (product?.price || 0) + delta
+          const base = effectiveSellingPrice(product?.price || 0, product?.festiveDiscountPercent)
+          const unitPrice = base + delta
 
           // Check if an identical custom piece already exists in bag
           const matchIndex = current.findIndex(
@@ -195,25 +223,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
       },
       setQuantity: (productId, quantity, customization) => {
-        setCart((current) =>
-          quantity <= 0
+        setCart((current) => {
+          const product = liveProducts.find((p) => p.id === productId) || initialProducts.find((p) => p.id === productId)
+          const isMadeToOrder = Boolean(product?.madeToOrder ?? true)
+          const stock = product?.readyToShipStock ?? 0
+          const capped =
+            quantity <= 0 ? 0 : isMadeToOrder ? quantity : Math.min(stock, Math.max(1, quantity))
+          return capped <= 0
             ? current.filter(
                 (item) =>
                   !(
                     item.productId === productId &&
                     (!customization || JSON.stringify(item.customization || {}) === JSON.stringify(customization))
-                  )
+                  ),
               )
             : current.map((item) => {
                 if (
                   item.productId === productId &&
                   (!customization || JSON.stringify(item.customization || {}) === JSON.stringify(customization))
                 ) {
-                  return { ...item, quantity }
+                  return { ...item, quantity: capped }
                 }
                 return item
-              }),
-        )
+              })
+        })
       },
       removeFromCart: (productId, finish, customization) =>
         setCart((current) =>
@@ -268,7 +301,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const product = liveProducts.find((p) => p.id === item.productId) || initialProducts.find((p) => p.id === item.productId)
           if (!product) return []
           const delta = item.customization?.totalCustomizationDelta || 0
-          const unitPrice = item.customUnitPrice ?? (product.price + delta)
+          const base = effectiveSellingPrice(product.price, product.festiveDiscountPercent)
+          const unitPrice = item.customUnitPrice ?? base + delta
           return [
             {
               product,

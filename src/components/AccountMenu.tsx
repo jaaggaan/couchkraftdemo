@@ -6,6 +6,7 @@ import { UserIcon } from './Icons'
 const items = [
   { to: '/account', label: 'Profile' },
   { to: '/account/orders', label: 'My orders' },
+  { to: '/account/custom-requests', label: 'Custom requests' },
   { to: '/account/track', label: 'Track order' },
   { to: '/account/addresses', label: 'Addresses' },
   { to: '/wishlist', label: 'Saved pieces' },

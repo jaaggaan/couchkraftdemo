@@ -12,9 +12,20 @@ function dataDirectory() {
 
 // server/supabase-client.ts
 import { createClient } from "@supabase/supabase-js";
-var SUPABASE_URL = process.env.SUPABASE_URL || "https://qzpnxxlwlphxdcdlbiph.supabase.co";
-var SUPABASE_KEY = process.env.SUPABASE_KEY || "sb_publishable_BfUf7XGJyrvhltzbKfq5Zg_zf_EFmnw";
-var supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+var SUPABASE_URL = process.env.SUPABASE_URL?.trim();
+var SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+if (!SUPABASE_URL) {
+  throw new Error("SUPABASE_URL is required for server-side database access.");
+}
+if (!SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for protected server-side database mutations.");
+}
+var supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
 
 // server/settings-store.ts
 var dataDir = dataDirectory();
@@ -85,18 +96,62 @@ async function fetchLiveSettings() {
 }
 
 // server/custom-request-store.ts
-import { randomBytes } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { resolve as resolve4 } from "node:path";
+
+// server/storage-upload.ts
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { resolve as resolve3 } from "node:path";
+import { randomBytes } from "node:crypto";
+function isAllowedReferenceImageUrl(url) {
+  const t = url.trim();
+  if (!t) return false;
+  if (t.startsWith("/uploads/")) return true;
+  return /^https?:\/\//i.test(t);
+}
+async function uploadPublicImage(bucket, objectPath, buffer, contentType, upsert = false) {
+  const safePath = objectPath.replace(/^\/+/, "");
+  const { error: storageError } = await supabase.storage.from(bucket).upload(safePath, buffer, {
+    contentType,
+    upsert,
+    cacheControl: "3600"
+  });
+  if (!storageError) {
+    const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(safePath);
+    const supabaseUrl = publicData.publicUrl || `${String(process.env.SUPABASE_URL || "").replace(/\/$/, "")}/storage/v1/object/public/${bucket}/${safePath}`;
+    return { url: supabaseUrl, source: "supabase" };
+  }
+  console.warn(`[StorageUpload] ${bucket}/${safePath}:`, storageError.message);
+  const publicUploads = resolve3(process.cwd(), "public", "uploads");
+  if (!existsSync2(publicUploads)) mkdirSync2(publicUploads, { recursive: true });
+  const baseName = safePath.split("/").pop() || `upload_${Date.now()}.bin`;
+  const finalName = `upload_${Date.now()}_${baseName}`;
+  writeFileSync2(resolve3(publicUploads, finalName), buffer);
+  return {
+    url: `/uploads/${finalName}`,
+    source: "local",
+    warning: storageError.message
+  };
+}
+function customRequestObjectPath(userId, fileName, ext) {
+  const safeUser = userId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "guest";
+  const safeName = fileName.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 80) || "reference";
+  const stamp = `${Date.now()}_${randomBytes(3).toString("hex")}`;
+  return `custom-requests/${safeUser}/${stamp}_${safeName}.${ext}`;
+}
+
+// server/custom-request-store.ts
 var dataDir2 = dataDirectory();
-var requestsFile = resolve3(dataDir2, "custom_requests.json");
+var requestsFile = resolve4(dataDir2, "custom_requests.json");
 function ensureRequestsFile() {
-  if (!existsSync2(dataDir2)) mkdirSync2(dataDir2, { recursive: true });
-  if (!existsSync2(requestsFile)) {
-    writeFileSync2(requestsFile, JSON.stringify([], null, 2), "utf8");
+  if (!existsSync3(dataDir2)) mkdirSync3(dataDir2, { recursive: true });
+  if (!existsSync3(requestsFile)) {
+    writeFileSync3(requestsFile, JSON.stringify([], null, 2), "utf8");
   }
 }
 function readCustomRequests() {
+  if (process.env.VERCEL) return [];
   ensureRequestsFile();
   try {
     const raw = readFileSync2(requestsFile, "utf8");
@@ -105,14 +160,140 @@ function readCustomRequests() {
     return [];
   }
 }
+async function listAllCustomRequests() {
+  const map = /* @__PURE__ */ new Map();
+  for (const row of readCustomRequests()) {
+    map.set(row.id, row);
+  }
+  try {
+    const { data, error } = await supabase.from("custom_requests").select("*").order("created_at", { ascending: false });
+    if (!error && data?.length) {
+      for (const row of data) {
+        const remote = fromDbRow(row);
+        const local = map.get(remote.id);
+        map.set(remote.id, local ? mergeRequests(local, remote) : remote);
+      }
+    } else if (error) {
+      console.warn("[CustomRequests] Supabase listAll:", error.message);
+    }
+  } catch (err) {
+    console.warn("[CustomRequests] Supabase listAll:", err);
+  }
+  return [...map.values()].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
+async function getCustomRequestById(id) {
+  const local = readCustomRequests().find((r) => r.id === id);
+  if (local) return local;
+  try {
+    const { data, error } = await supabase.from("custom_requests").select("*").eq("id", id).maybeSingle();
+    if (error || !data) return null;
+    return fromDbRow(data);
+  } catch {
+    return null;
+  }
+}
+async function persistCustomRequest(updated) {
+  if (!process.env.VERCEL) {
+    const requests = readCustomRequests();
+    const idx = requests.findIndex((r) => r.id === updated.id);
+    if (idx === -1) requests.unshift(updated);
+    else requests[idx] = updated;
+    writeCustomRequests(requests);
+  }
+  const { error } = await supabase.from("custom_requests").update({
+    status: updated.status,
+    admin_notes: updated.adminNotes,
+    quote_amount: updated.quoteAmount ?? null,
+    payment_status: updated.paymentStatus || "none",
+    linked_order_id: updated.linkedOrderId ?? null,
+    updated_at: updated.updatedAt
+  }).eq("id", updated.id);
+  if (error) console.warn("[Supabase Custom Request Update]:", error.message);
+  return updated;
+}
 function writeCustomRequests(items) {
   ensureRequestsFile();
-  writeFileSync2(requestsFile, JSON.stringify(items, null, 2), "utf8");
+  writeFileSync3(requestsFile, JSON.stringify(items, null, 2), "utf8");
+}
+function fromDbRow(row) {
+  const dimensions = row.dimensions || {};
+  const refFromDims = Array.isArray(dimensions.referenceImages) ? dimensions.referenceImages : [];
+  return {
+    id: String(row.id),
+    customerId: row.customer_id ?? null,
+    customerName: String(row.customer_name || ""),
+    customerEmail: row.customer_email ? String(row.customer_email) : void 0,
+    customerPhone: String(row.customer_phone || ""),
+    productId: row.product_id ? String(row.product_id) : void 0,
+    productName: row.product_name ? String(row.product_name) : void 0,
+    productUrl: row.product_url ? String(row.product_url) : void 0,
+    seatingCapacity: row.seating_capacity ? String(row.seating_capacity) : void 0,
+    dimensions,
+    material: row.material ? String(row.material) : void 0,
+    fabric: row.fabric ? String(row.fabric) : void 0,
+    color: row.color ? String(row.color) : void 0,
+    budget: row.budget ? String(row.budget) : void 0,
+    notes: row.notes ? String(row.notes) : void 0,
+    referenceImages: refFromDims.length ? refFromDims.filter((u) => isAllowedReferenceImageUrl(u)) : void 0,
+    status: row.status || "new",
+    adminNotes: row.admin_notes ? String(row.admin_notes) : "",
+    quoteAmount: row.quote_amount != null ? Number(row.quote_amount) : null,
+    paymentStatus: row.payment_status || "none",
+    linkedOrderId: row.linked_order_id ? String(row.linked_order_id) : null,
+    createdAt: String(row.created_at || (/* @__PURE__ */ new Date()).toISOString()),
+    updatedAt: String(row.updated_at || row.created_at || (/* @__PURE__ */ new Date()).toISOString())
+  };
+}
+function mergeRequests(local, remote) {
+  const remoteNewer = new Date(remote.updatedAt).getTime() >= new Date(local.updatedAt).getTime();
+  return {
+    ...local,
+    ...remote,
+    referenceImages: remote.referenceImages?.length ? remote.referenceImages : local.referenceImages,
+    status: remoteNewer ? remote.status : local.status,
+    adminNotes: remoteNewer ? remote.adminNotes : local.adminNotes,
+    quoteAmount: remote.quoteAmount != null ? remote.quoteAmount : local.quoteAmount,
+    paymentStatus: remoteNewer ? remote.paymentStatus : local.paymentStatus,
+    linkedOrderId: remote.linkedOrderId || local.linkedOrderId,
+    updatedAt: remoteNewer ? remote.updatedAt : local.updatedAt
+  };
+}
+async function listCustomRequestsForCustomer(customerId) {
+  const map = /* @__PURE__ */ new Map();
+  for (const row of readCustomRequests().filter((r) => r.customerId === customerId)) {
+    map.set(row.id, row);
+  }
+  try {
+    const { data, error } = await supabase.from("custom_requests").select("*").eq("customer_id", customerId).order("created_at", { ascending: false });
+    if (!error && data?.length) {
+      for (const row of data) {
+        const remote = fromDbRow(row);
+        const local = map.get(remote.id);
+        map.set(remote.id, local ? mergeRequests(local, remote) : remote);
+      }
+    }
+  } catch (err) {
+    console.warn("[CustomRequests] Supabase list:", err);
+  }
+  return [...map.values()].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
+async function getCustomRequestForCustomer(customerId, requestId) {
+  const list = await listCustomRequestsForCustomer(customerId);
+  return list.find((r) => r.id === requestId) ?? null;
 }
 async function createCustomRequest(input) {
   const requests = readCustomRequests();
-  const id = `CK-REQ-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString("hex").toUpperCase()}`;
+  const id = `CK-REQ-${Date.now().toString(36).toUpperCase()}-${randomBytes2(2).toString("hex").toUpperCase()}`;
   const now = (/* @__PURE__ */ new Date()).toISOString();
+  const referenceImages = Array.isArray(input.referenceImages) ? input.referenceImages.filter((u) => typeof u === "string" && isAllowedReferenceImageUrl(u)).slice(0, 6) : void 0;
+  const dimensions = {
+    ...input.dimensions && typeof input.dimensions === "object" ? input.dimensions : {},
+    ...referenceImages?.length ? { referenceImages } : {}
+  };
   const newReq = {
     id,
     customerId: input.customerId || null,
@@ -123,19 +304,25 @@ async function createCustomRequest(input) {
     productName: input.productName || void 0,
     productUrl: input.productUrl || void 0,
     seatingCapacity: input.seatingCapacity || void 0,
-    dimensions: input.dimensions || {},
+    dimensions,
     material: input.material || void 0,
     fabric: input.fabric || void 0,
     color: input.color || void 0,
     budget: input.budget || void 0,
     notes: input.notes || void 0,
+    referenceImages,
     status: "new",
     adminNotes: "",
+    quoteAmount: null,
+    paymentStatus: "none",
+    linkedOrderId: null,
     createdAt: now,
     updatedAt: now
   };
-  requests.unshift(newReq);
-  writeCustomRequests(requests);
+  if (!process.env.VERCEL) {
+    requests.unshift(newReq);
+    writeCustomRequests(requests);
+  }
   try {
     const dbRow = {
       id: newReq.id,
@@ -147,7 +334,10 @@ async function createCustomRequest(input) {
       product_name: newReq.productName,
       product_url: newReq.productUrl,
       seating_capacity: newReq.seatingCapacity,
-      dimensions: newReq.dimensions,
+      dimensions: {
+        ...newReq.dimensions || {},
+        ...newReq.referenceImages?.length ? { referenceImages: newReq.referenceImages } : {}
+      },
       material: newReq.material,
       fabric: newReq.fabric,
       color: newReq.color,
@@ -155,63 +345,95 @@ async function createCustomRequest(input) {
       notes: newReq.notes,
       status: newReq.status,
       admin_notes: newReq.adminNotes,
+      quote_amount: newReq.quoteAmount ?? null,
+      payment_status: newReq.paymentStatus || "none",
+      linked_order_id: newReq.linkedOrderId ?? null,
       created_at: newReq.createdAt,
       updated_at: newReq.updatedAt
     };
-    Promise.resolve(
-      supabase.from("custom_requests").insert([dbRow])
-    ).then((res) => {
-      if (res?.error) console.warn("[Supabase Custom Request Insert Notice]:", res.error.message);
-      else console.log(`[Supabase Custom Request Synced]: ${newReq.id}`);
-    }).catch((err) => console.warn("[Supabase Custom Request Error]:", err));
+    const { error } = await supabase.from("custom_requests").insert([dbRow]);
+    if (error) {
+      console.warn("[Supabase Custom Request Insert]:", error.message);
+      if (process.env.VERCEL) {
+        throw new Error(`Could not save custom request: ${error.message}`);
+      }
+    }
   } catch (err) {
     console.warn("[Supabase Custom Request Exception]:", err);
+    if (process.env.VERCEL && err instanceof Error) throw err;
   }
   return newReq;
 }
-async function updateCustomRequestStatus(id, updates) {
-  const requests = readCustomRequests();
-  const idx = requests.findIndex((r) => r.id === id);
-  if (idx === -1) return null;
-  const existing = requests[idx];
+async function patchCustomRequest(id, patch) {
+  const existing = await getCustomRequestById(id);
+  if (!existing) return null;
   const updated = {
     ...existing,
-    ...updates,
+    ...patch,
     id: existing.id,
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
-  requests[idx] = updated;
-  writeCustomRequests(requests);
-  try {
-    supabase.from("custom_requests").update({
-      status: updated.status,
-      admin_notes: updated.adminNotes,
-      updated_at: updated.updatedAt
-    }).eq("id", id).then(({ error }) => {
-      if (error) console.warn("[Supabase Custom Request Update Notice]:", error.message);
-    });
-  } catch {
+  return persistCustomRequest(updated);
+}
+async function updateCustomRequestStatus(id, updates) {
+  const existing = await getCustomRequestById(id);
+  if (!existing) return null;
+  let quoteAmount = updates.quoteAmount;
+  if (quoteAmount === void 0) quoteAmount = existing.quoteAmount;
+  if (typeof quoteAmount === "number" && quoteAmount < 0) quoteAmount = null;
+  const updated = {
+    ...existing,
+    status: updates.status ?? existing.status,
+    adminNotes: updates.adminNotes ?? existing.adminNotes,
+    quoteAmount: quoteAmount ?? null,
+    id: existing.id,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  return persistCustomRequest(updated);
+}
+async function linkCustomRequestOrder(requestId, orderId) {
+  return patchCustomRequest(requestId, {
+    linkedOrderId: orderId,
+    paymentStatus: "awaiting"
+  });
+}
+async function markCustomRequestPaid(requestId, orderId) {
+  return patchCustomRequest(requestId, {
+    linkedOrderId: orderId,
+    paymentStatus: "paid"
+  });
+}
+function customRequestIdFromOrderItems(items) {
+  for (const item of items) {
+    const c = item.customization;
+    if (c?.customRequestId) return c.customRequestId;
   }
-  return updated;
+  return null;
+}
+async function markCustomRequestPaidFromOrder(order) {
+  if (order.paymentStatus !== "paid") return;
+  const requestId = customRequestIdFromOrderItems(order.items);
+  if (!requestId) return;
+  await markCustomRequestPaid(requestId, order.id);
 }
 
 // server/admin-api-handler.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync5 } from "node:fs";
-import { resolve as resolve6 } from "node:path";
-import bcrypt2 from "bcryptjs";
+import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync5, writeFileSync as writeFileSync6 } from "node:fs";
+import { resolve as resolve7 } from "node:path";
+import bcrypt3 from "bcryptjs";
 
 // server/admin-store.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync3, writeFileSync as writeFileSync3 } from "node:fs";
-import { resolve as resolve4 } from "node:path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync3, writeFileSync as writeFileSync4 } from "node:fs";
+import { resolve as resolve5 } from "node:path";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 var dataDir3 = dataDirectory();
-var adminsPath = resolve4(dataDir3, "admins.json");
-var auditPath = resolve4(dataDir3, "admin-audit.json");
+var adminsPath = resolve5(dataDir3, "admins.json");
+var auditPath = resolve5(dataDir3, "admin-audit.json");
 var ADMIN_SECRET = process.env.COUCHKRAFT_ADMIN_SECRET || "couchkraft-admin-secure-key-2026";
 function ensureStore() {
-  if (!existsSync3(dataDir3)) mkdirSync3(dataDir3, { recursive: true });
-  if (!existsSync3(adminsPath)) {
+  if (!existsSync4(dataDir3)) mkdirSync4(dataDir3, { recursive: true });
+  if (!existsSync4(adminsPath)) {
     const defaultPasswordHash = bcrypt.hashSync("Admin@CouchKraft2026!", 10);
     const initialAdmins = [
       {
@@ -224,10 +446,10 @@ function ensureStore() {
         createdAt: (/* @__PURE__ */ new Date()).toISOString()
       }
     ];
-    writeFileSync3(adminsPath, JSON.stringify(initialAdmins, null, 2), "utf8");
+    writeFileSync4(adminsPath, JSON.stringify(initialAdmins, null, 2), "utf8");
   }
-  if (!existsSync3(auditPath)) {
-    writeFileSync3(auditPath, "[]", "utf8");
+  if (!existsSync4(auditPath)) {
+    writeFileSync4(auditPath, "[]", "utf8");
   }
 }
 function readAdmins() {
@@ -288,7 +510,7 @@ function logAdminAction(entry) {
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
     };
     existing.unshift(newEntry);
-    writeFileSync3(auditPath, JSON.stringify(existing.slice(0, 500), null, 2), "utf8");
+    writeFileSync4(auditPath, JSON.stringify(existing.slice(0, 500), null, 2), "utf8");
   } catch (err) {
     console.error("Failed to log admin action:", err);
   }
@@ -303,6 +525,34 @@ function getAuditLogs(limit = 50) {
   }
 }
 
+// server/inventory-rules.ts
+function normalizeInventoryFields(input) {
+  const madeToOrder = Boolean(input.madeToOrder ?? input.made_to_order ?? true);
+  const readyToShipStock = Math.max(0, Number(input.readyToShipStock ?? input.ready_to_ship_stock) || 0);
+  const lowStockThreshold = Math.max(0, Number(input.lowStockThreshold ?? input.low_stock_threshold) || 2);
+  const leadTimeWeeks = Math.max(0, Number(input.leadTimeWeeks ?? input.lead_time_weeks) || 3);
+  return {
+    ...input,
+    madeToOrder,
+    made_to_order: madeToOrder,
+    readyToShipStock,
+    ready_to_ship_stock: readyToShipStock,
+    lowStockThreshold,
+    low_stock_threshold: lowStockThreshold,
+    leadTimeWeeks,
+    lead_time_weeks: leadTimeWeeks
+  };
+}
+function validateInventoryPatch(input) {
+  const normalized = normalizeInventoryFields(input);
+  if (normalized.madeToOrder) return null;
+  const stock = Number(normalized.readyToShipStock ?? normalized.ready_to_ship_stock) || 0;
+  const threshold = Number(normalized.lowStockThreshold ?? normalized.low_stock_threshold) || 0;
+  if (stock < 0) return "Ready-to-ship stock cannot be negative.";
+  if (threshold < 0) return "Low-stock threshold cannot be negative.";
+  return null;
+}
+
 // server/product-store.ts
 function resolveCategoryId(categoryName, explicitId) {
   if (explicitId && ["cat_sofas", "cat_chairs", "cat_storage", "cat_accent"].includes(explicitId)) {
@@ -315,6 +565,9 @@ function resolveCategoryId(categoryName, explicitId) {
   return "cat_sofas";
 }
 function toProductDbRow(p) {
+  const inventoryError = validateInventoryPatch(p);
+  if (inventoryError) throw new Error(inventoryError);
+  const inventory = normalizeInventoryFields(p);
   const name = String(p.name || "Untitled Piece").trim();
   const slug = (p.slug || name || "product").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const categoryName = p.category || "Living Room > Sofas & Couches";
@@ -350,10 +603,10 @@ function toProductDbRow(p) {
     warranty: p.warranty || "5 Years Structural Frame",
     structural_wood: p.structuralWood ?? p.structural_wood ?? "Kiln-dried Teak & Sheesham Hardwood",
     foam_upholstery: p.foamUpholstery ?? p.foam_upholstery ?? "38-Density Ultra-Cell Foam + Belgian Linen Blend",
-    ready_to_ship_stock: Number(p.readyToShipStock ?? p.ready_to_ship_stock) || 0,
-    low_stock_threshold: Number(p.lowStockThreshold ?? p.low_stock_threshold) || 2,
-    made_to_order: p.madeToOrder ?? p.made_to_order ?? true,
-    lead_time_weeks: Number(p.leadTimeWeeks ?? p.lead_time_weeks) || 3,
+    ready_to_ship_stock: inventory.ready_to_ship_stock,
+    low_stock_threshold: inventory.low_stock_threshold,
+    made_to_order: inventory.made_to_order,
+    lead_time_weeks: inventory.lead_time_weeks,
     customization_enabled: p.customizationEnabled ?? p.customization_enabled ?? true,
     customization_tolerance_cm: Number(p.customizationToleranceCm ?? p.customization_tolerance_cm) || 15,
     allow_com_upholstery: p.allowComUpholstery ?? p.allow_com_upholstery ?? true,
@@ -361,7 +614,16 @@ function toProductDbRow(p) {
     meta_description: p.metaDescription ?? p.meta_description ?? (p.shortExcerpt || p.description || "").slice(0, 160),
     status: p.status || "published",
     gst_slab: p.gstSlab ?? p.gst_slab ?? "18% GST (Standard Furniture)",
-    hsn_code: p.hsnCode ?? p.hsn_code ?? "9403 6000"
+    hsn_code: p.hsnCode ?? p.hsn_code ?? "9403 6000",
+    festive_discount_percent: (() => {
+      const n = Math.round(Number(p.festiveDiscountPercent ?? p.festive_discount_percent) || 0);
+      return Math.min(100, Math.max(0, n));
+    })(),
+    extra_discount_type: (() => {
+      const n = Math.round(Number(p.festiveDiscountPercent ?? p.festive_discount_percent) || 0);
+      if (n <= 0) return null;
+      return p.extraDiscountType === "standard" || p.extra_discount_type === "standard" ? "standard" : "festive";
+    })()
   };
 }
 function fromProductDbRow(row) {
@@ -374,6 +636,8 @@ function fromProductDbRow(row) {
     sku: row.sku || "",
     price: Number(row.price) || 0,
     compareAt: Number(row.compare_at ?? row.compareAt) || 0,
+    festiveDiscountPercent: Number(row.festive_discount_percent ?? row.festiveDiscountPercent) || 0,
+    extraDiscountType: Number(row.festive_discount_percent ?? row.festiveDiscountPercent) > 0 ? row.extra_discount_type === "standard" || row.extraDiscountType === "standard" ? "standard" : "festive" : void 0,
     gstSlab: row.gst_slab ?? row.gstSlab ?? "18% GST (Standard Furniture)",
     hsnCode: row.hsn_code ?? row.hsnCode ?? "9403 6000",
     description: row.description || "",
@@ -458,6 +722,25 @@ async function updateProduct(id, updates) {
     return null;
   }
   return fromProductDbRow(data[0]);
+}
+var BESPOKE_PLACEHOLDER_ID = "prod_bespoke_commission";
+async function setFestiveDiscountForProducts(input) {
+  const clearing = input.percent == null;
+  const patch = {
+    festive_discount_percent: clearing ? 0 : Math.min(100, Math.max(1, Math.round(input.percent))),
+    extra_discount_type: clearing ? null : input.discountType === "standard" ? "standard" : "festive",
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  if (input.scope === "one") {
+    const productId = String(input.productId || "").trim();
+    if (!productId) throw new Error("Product id is required for single-product discount.");
+    const { data: data2, error: error2 } = await supabase.from("products").update(patch).eq("id", productId).neq("id", BESPOKE_PLACEHOLDER_ID).select("id");
+    if (error2) throw new Error(error2.message);
+    return { updatedCount: data2?.length ?? 0 };
+  }
+  const { data, error } = await supabase.from("products").update(patch).neq("status", "archived").neq("id", BESPOKE_PLACEHOLDER_ID).select("id");
+  if (error) throw new Error(error.message);
+  return { updatedCount: data?.length ?? 0 };
 }
 async function deleteProduct(id) {
   const { error } = await supabase.from("products").delete().eq("id", id);
@@ -548,11 +831,12 @@ async function deleteCategory(id) {
 }
 
 // server/marketing-store.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "node:fs";
-import { resolve as resolve5 } from "node:path";
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync4, writeFileSync as writeFileSync5 } from "node:fs";
+import { resolve as resolve6 } from "node:path";
 var dataDir4 = dataDirectory();
-var couponsPath = resolve5(dataDir4, "coupons.json");
-var bannersPath = resolve5(dataDir4, "banners.json");
+var couponsPath = resolve6(dataDir4, "coupons.json");
+var bannersPath = resolve6(dataDir4, "banners.json");
 var initialCoupons = [
   {
     id: "coup_warm10",
@@ -656,12 +940,12 @@ var initialBanners = [
   }
 ];
 function ensureStore2() {
-  if (!existsSync4(dataDir4)) mkdirSync4(dataDir4, { recursive: true });
-  if (!existsSync4(couponsPath)) {
-    writeFileSync4(couponsPath, JSON.stringify(initialCoupons, null, 2), "utf8");
+  if (!existsSync5(dataDir4)) mkdirSync5(dataDir4, { recursive: true });
+  if (!existsSync5(couponsPath)) {
+    writeFileSync5(couponsPath, JSON.stringify(initialCoupons, null, 2), "utf8");
   }
-  if (!existsSync4(bannersPath)) {
-    writeFileSync4(bannersPath, JSON.stringify(initialBanners, null, 2), "utf8");
+  if (!existsSync5(bannersPath)) {
+    writeFileSync5(bannersPath, JSON.stringify(initialBanners, null, 2), "utf8");
   }
 }
 function readCoupons() {
@@ -674,7 +958,11 @@ function readCoupons() {
 }
 function writeCoupons(coupons) {
   ensureStore2();
-  writeFileSync4(couponsPath, JSON.stringify(coupons, null, 2), "utf8");
+  writeFileSync5(couponsPath, JSON.stringify(coupons, null, 2), "utf8");
+}
+function findCouponByCode(code) {
+  const coupons = readCoupons();
+  return coupons.find((c) => c.code.toUpperCase() === code.toUpperCase().trim()) ?? null;
 }
 function createCoupon(input) {
   const coupons = readCoupons();
@@ -720,6 +1008,86 @@ function deleteCoupon(id) {
   writeCoupons(filtered);
   return true;
 }
+function couponsForCustomer(customerId) {
+  return readCoupons().filter((c) => c.customerId === customerId);
+}
+function createPersonalCoupon(input) {
+  const token = randomBytes3(2).toString("hex").toUpperCase();
+  const slug = (input.customerName || "GUEST").replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase() || "GUEST";
+  const code = `CK-${slug}-${token}`;
+  return createCoupon({
+    code,
+    type: input.type || "percent",
+    value: input.value ?? 12,
+    minOrderValue: input.minOrderValue ?? 15e3,
+    maxDiscount: 2e4,
+    usageLimit: 1,
+    description: input.description || `Personal offer for ${input.customerName}`,
+    personal: true,
+    customerId: input.customerId,
+    customerName: input.customerName,
+    customerEmail: input.customerEmail,
+    redeemed: false,
+    source: input.source || "admin",
+    active: true
+  });
+}
+function createWelcomeCoupon(customerId, customerName, customerEmail) {
+  const existing = readCoupons().find(
+    (c) => c.customerId === customerId && c.source === "welcome" && !c.redeemed
+  );
+  if (existing) return existing;
+  return createPersonalCoupon({
+    customerId,
+    customerName,
+    customerEmail,
+    source: "welcome",
+    value: 12,
+    minOrderValue: 15e3,
+    description: `Welcome to CouchKraft \u2014 12% off your first order, ${customerName.split(" ")[0] || "friend"}.`
+  });
+}
+function redeemPersonalCoupon(code, customerId) {
+  const coupons = readCoupons();
+  const idx = coupons.findIndex((c) => c.code.toUpperCase() === code.toUpperCase().trim());
+  if (idx === -1) return false;
+  const coupon = coupons[idx];
+  if (!coupon.personal) return false;
+  if (coupon.customerId !== customerId) return false;
+  if (coupon.redeemed) return false;
+  coupons[idx] = {
+    ...coupon,
+    redeemed: true,
+    redeemedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    usedCount: Math.max(coupon.usedCount, 1),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  writeCoupons(coupons);
+  return true;
+}
+function applyFileCouponDiscount(coupon, subtotal, customerId) {
+  if (!coupon.active) return { ok: false, discount: 0, message: "This offer is not active." };
+  if (coupon.personal) {
+    if (coupon.customerId !== customerId) {
+      return { ok: false, discount: 0, message: "This coupon is tied to another account." };
+    }
+    if (coupon.redeemed) return { ok: false, discount: 0, message: "This personal coupon has already been used." };
+  } else if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+    return { ok: false, discount: 0, message: "This coupon has reached its usage limit." };
+  }
+  const minVal = Number(coupon.minOrderValue) || 0;
+  if (subtotal < minVal) {
+    return { ok: false, discount: 0, message: `Minimum order for this coupon is \u20B9${minVal.toLocaleString("en-IN")}.` };
+  }
+  let discount = 0;
+  if (coupon.type === "percent") {
+    const calc = Math.round(subtotal * (Number(coupon.value) / 100));
+    discount = coupon.maxDiscount ? Math.min(calc, Number(coupon.maxDiscount)) : calc;
+  } else {
+    discount = Math.min(subtotal, Number(coupon.value) || 0);
+  }
+  return { ok: true, discount };
+}
 function readBanners() {
   ensureStore2();
   try {
@@ -731,7 +1099,7 @@ function readBanners() {
 }
 function writeBanners(banners) {
   ensureStore2();
-  writeFileSync4(bannersPath, JSON.stringify(banners, null, 2), "utf8");
+  writeFileSync5(bannersPath, JSON.stringify(banners, null, 2), "utf8");
 }
 function createBanner(input) {
   const banners = readBanners();
@@ -777,673 +1145,8 @@ function deleteBanner(id) {
   return true;
 }
 
-// server/admin-api-handler.ts
-var ADMIN_COOKIE = "ck_admin_session";
-function send(res, status, data) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(data));
-  return true;
-}
-function parseCookies(header) {
-  const out = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const [key, ...rest] = part.trim().split("=");
-    if (key) out[key] = decodeURIComponent(rest.join("="));
-  }
-  return out;
-}
-function cookieFlags() {
-  return process.env.VERCEL ? "HttpOnly; Path=/; SameSite=Lax; Secure" : "HttpOnly; Path=/; SameSite=Lax";
-}
-function setAdminSession(res, token) {
-  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=${token}; ${cookieFlags()}; Max-Age=${60 * 60 * 24 * 7}`);
-}
-function clearAdminSession(res) {
-  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=; ${cookieFlags()}; Max-Age=0`);
-}
-function currentAdmin(req) {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token2 = authHeader.slice(7).trim();
-    const admin = verifyAdminToken(token2);
-    if (admin) return admin;
-  }
-  const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[ADMIN_COOKIE];
-  if (token) {
-    return verifyAdminToken(token);
-  }
-  return null;
-}
-function readAllOrders() {
-  try {
-    const p = resolve6(dataDirectory(), "orders.json");
-    if (existsSync5(p)) {
-      return JSON.parse(readFileSync5(p, "utf8"));
-    }
-  } catch {
-  }
-  return [];
-}
-function writeAllOrders(orders) {
-  const p = resolve6(dataDirectory(), "orders.json");
-  writeFileSync5(p, JSON.stringify(orders, null, 2), "utf8");
-}
-function readAllCustomers() {
-  try {
-    const p = resolve6(dataDirectory(), "customers.json");
-    if (existsSync5(p)) {
-      return JSON.parse(readFileSync5(p, "utf8"));
-    }
-  } catch {
-  }
-  return [];
-}
-async function handleAdminApi(req, res, url, body) {
-  if (req.method === "POST" && url === "/api/admin/auth/login") {
-    const email = String(body.email || "").trim();
-    const password = String(body.password || "");
-    if (!email || !password) {
-      return send(res, 400, { error: "Please enter administrator email and password." });
-    }
-    const admin2 = findAdminByEmail(email);
-    if (!admin2) {
-      return send(res, 401, { error: "Invalid administrator credentials." });
-    }
-    const matches = await bcrypt2.compare(password, admin2.passwordHash);
-    if (!matches) {
-      return send(res, 401, { error: "Invalid administrator credentials." });
-    }
-    const token = signAdminToken(admin2);
-    setAdminSession(res, token);
-    logAdminAction({
-      adminId: admin2.id,
-      adminName: admin2.name,
-      action: "login",
-      targetType: "admin_session",
-      targetId: admin2.id
-    });
-    return send(res, 200, {
-      admin: publicAdmin(admin2),
-      token,
-      message: "Welcome back, " + admin2.name
-    });
-  }
-  if (req.method === "POST" && url === "/api/admin/auth/logout") {
-    clearAdminSession(res);
-    return send(res, 200, { ok: true, message: "Signed out successfully." });
-  }
-  const admin = currentAdmin(req);
-  if (!admin) {
-    return send(res, 401, { error: "Unauthorized. Admin session required." });
-  }
-  if (req.method === "GET" && url === "/api/admin/auth/me") {
-    return send(res, 200, { admin: publicAdmin(admin) });
-  }
-  if (req.method === "GET" && url === "/api/admin/dashboard/stats") {
-    const orders = readAllOrders();
-    const customers = readAllCustomers();
-    const products2 = await readProducts();
-    const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-    const todayOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(todayStr));
-    const todaySales = todayOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
-    const thisMonthStr = todayStr.slice(0, 7);
-    const monthOrders = orders.filter((o) => o.createdAt && o.createdAt.startsWith(thisMonthStr));
-    const monthSales = monthOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
-    const totalRevenue = orders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
-    const pendingOrders = orders.filter((o) => o.fulfilmentStatus !== "delivered").length;
-    const deliveredOrders = orders.filter((o) => o.fulfilmentStatus === "delivered").length;
-    const lowStockProducts = products2.filter((p) => p.readyToShipStock <= p.lowStockThreshold);
-    return send(res, 200, {
-      todaySales,
-      todayOrdersCount: todayOrders.length,
-      monthlySales: monthSales,
-      totalRevenue,
-      totalOrders: orders.length,
-      pendingOrders,
-      deliveredOrders,
-      customerCount: customers.length,
-      totalProducts: products2.length,
-      lowStockCount: lowStockProducts.length,
-      lowStockProducts: lowStockProducts.slice(0, 5),
-      pendingEnquiriesCount: 3,
-      // Customization inquiries telemetry
-      recentOrders: orders.slice(0, 6),
-      recentAudit: getAuditLogs(5)
-    });
-  }
-  if (req.method === "GET" && url === "/api/admin/products") {
-    try {
-      const products2 = await readProducts();
-      return send(res, 200, { products: products2 });
-    } catch (err) {
-      return send(res, 500, { error: err.message || "Failed to fetch products from Supabase." });
-    }
-  }
-  if (req.method === "POST" && url === "/api/admin/products") {
-    try {
-      const created = await createProduct(body);
-      logAdminAction({
-        adminId: admin.id,
-        adminName: admin.name,
-        action: "create_product",
-        targetType: "product",
-        targetId: created.id,
-        details: { name: created.name, sku: created.sku, price: created.price }
-      });
-      return send(res, 201, { product: created, message: "Product created and published to Supabase successfully." });
-    } catch (err) {
-      return send(res, 400, { error: err.message || "Failed to create product in Supabase." });
-    }
-  }
-  const productMatch = url.match(/^\/api\/admin\/products\/([^/]+)$/);
-  if (productMatch) {
-    const prodId = productMatch[1];
-    if (req.method === "GET") {
-      const prod = await findProductById(prodId);
-      if (!prod) return send(res, 404, { error: "Product not found." });
-      return send(res, 200, { product: prod });
-    }
-    if (req.method === "PUT") {
-      try {
-        const updated = await updateProduct(prodId, body);
-        if (!updated) return send(res, 404, { error: "Product not found." });
-        logAdminAction({
-          adminId: admin.id,
-          adminName: admin.name,
-          action: "update_product",
-          targetType: "product",
-          targetId: updated.id,
-          details: { name: updated.name, price: updated.price, status: updated.status }
-        });
-        return send(res, 200, { product: updated, message: "Product updated in Supabase successfully." });
-      } catch (err) {
-        return send(res, 400, { error: err.message || "Failed to update product in Supabase." });
-      }
-    }
-    if (req.method === "DELETE") {
-      try {
-        const deleted = await deleteProduct(prodId);
-        if (!deleted) return send(res, 404, { error: "Product not found." });
-        logAdminAction({
-          adminId: admin.id,
-          adminName: admin.name,
-          action: "delete_product",
-          targetType: "product",
-          targetId: prodId
-        });
-        return send(res, 200, { ok: true, message: "Product removed from catalog." });
-      } catch (err) {
-        return send(res, 400, { error: err.message || "Failed to delete product from Supabase." });
-      }
-    }
-  }
-  if (req.method === "GET" && url === "/api/admin/categories") {
-    try {
-      const categories = await readCategories();
-      return send(res, 200, { categories });
-    } catch (err) {
-      return send(res, 500, { error: err.message || "Failed to fetch categories." });
-    }
-  }
-  if (req.method === "POST" && url === "/api/admin/categories") {
-    try {
-      const created = await createCategory(body);
-      return send(res, 201, { category: created });
-    } catch (err) {
-      return send(res, 400, { error: err.message || "Failed to create category." });
-    }
-  }
-  const catMatch = url.match(/^\/api\/admin\/categories\/([^/]+)$/);
-  if (catMatch) {
-    const catId = catMatch[1];
-    if (req.method === "PUT") {
-      try {
-        const updated = await updateCategory(catId, body);
-        if (!updated) return send(res, 404, { error: "Category not found." });
-        return send(res, 200, { category: updated });
-      } catch (err) {
-        return send(res, 400, { error: err.message || "Failed to update category." });
-      }
-    }
-    if (req.method === "DELETE") {
-      try {
-        const ok = await deleteCategory(catId);
-        if (!ok) return send(res, 404, { error: "Category not found." });
-        return send(res, 200, { ok: true });
-      } catch (err) {
-        return send(res, 400, { error: err.message || "Failed to delete category." });
-      }
-    }
-  }
-  if (req.method === "GET" && url === "/api/admin/inventory") {
-    const products2 = await readProducts();
-    const inventory = products2.map((p) => ({
-      id: p.id,
-      name: p.name,
-      sku: p.sku,
-      category: p.category,
-      readyToShipStock: p.readyToShipStock,
-      lowStockThreshold: p.lowStockThreshold,
-      madeToOrder: p.madeToOrder,
-      leadTimeWeeks: p.leadTimeWeeks,
-      status: p.readyToShipStock <= 0 ? "Out of Stock" : p.readyToShipStock <= p.lowStockThreshold ? "Low Stock" : "In Stock",
-      image: p.images[0] || "",
-      price: p.price
-    }));
-    return send(res, 200, { inventory });
-  }
-  if (req.method === "GET" && url === "/api/admin/coupons") {
-    return send(res, 200, { coupons: readCoupons() });
-  }
-  if (req.method === "POST" && url === "/api/admin/coupons") {
-    const created = createCoupon(body);
-    logAdminAction({
-      adminId: admin.id,
-      adminName: admin.name,
-      action: "create_coupon",
-      targetType: "coupon",
-      targetId: created.id,
-      details: { code: created.code, value: created.value, type: created.type }
-    });
-    return send(res, 201, { coupon: created, message: "Coupon created." });
-  }
-  const couponMatch = url.match(/^\/api\/admin\/coupons\/([^/]+)$/);
-  if (couponMatch) {
-    const coupId = couponMatch[1];
-    if (req.method === "PUT") {
-      const updated = updateCoupon(coupId, body);
-      if (!updated) return send(res, 404, { error: "Coupon not found." });
-      return send(res, 200, { coupon: updated, message: "Coupon updated." });
-    }
-    if (req.method === "DELETE") {
-      const ok = deleteCoupon(coupId);
-      if (!ok) return send(res, 404, { error: "Coupon not found." });
-      return send(res, 200, { ok: true, message: "Coupon deleted." });
-    }
-  }
-  if (req.method === "GET" && url === "/api/admin/banners") {
-    return send(res, 200, { banners: readBanners() });
-  }
-  if (req.method === "POST" && url === "/api/admin/banners") {
-    const created = createBanner(body);
-    return send(res, 201, { banner: created, message: "Promotional banner added." });
-  }
-  const bannerMatch = url.match(/^\/api\/admin\/banners\/([^/]+)$/);
-  if (bannerMatch) {
-    const bannerId = bannerMatch[1];
-    if (req.method === "PUT") {
-      const updated = updateBanner(bannerId, body);
-      if (!updated) return send(res, 404, { error: "Banner not found." });
-      return send(res, 200, { banner: updated, message: "Banner updated." });
-    }
-    if (req.method === "DELETE") {
-      const ok = deleteBanner(bannerId);
-      if (!ok) return send(res, 404, { error: "Banner not found." });
-      return send(res, 200, { ok: true, message: "Banner removed." });
-    }
-  }
-  if (req.method === "GET" && url === "/api/admin/orders") {
-    const orders = readAllOrders();
-    return send(res, 200, { orders });
-  }
-  const orderStatusMatch = url.match(/^\/api\/admin\/orders\/([^/]+)\/status$/);
-  if (orderStatusMatch && req.method === "PUT") {
-    const orderId = orderStatusMatch[1];
-    const orders = readAllOrders();
-    const idx = orders.findIndex((o) => o.id === orderId || o.number === orderId);
-    if (idx === -1) return send(res, 404, { error: "Order not found." });
-    const fulfilmentStatus = String(body.fulfilmentStatus || orders[idx].fulfilmentStatus);
-    const paymentStatus = String(body.paymentStatus || orders[idx].paymentStatus);
-    const trackingNumber = body.trackingNumber !== void 0 ? String(body.trackingNumber) : orders[idx].trackingNumber;
-    orders[idx] = {
-      ...orders[idx],
-      fulfilmentStatus,
-      paymentStatus,
-      trackingNumber
-    };
-    writeAllOrders(orders);
-    logAdminAction({
-      adminId: admin.id,
-      adminName: admin.name,
-      action: "update_order_status",
-      targetType: "order",
-      targetId: orders[idx].id,
-      details: { orderNumber: orders[idx].number, fulfilmentStatus, paymentStatus }
-    });
-    return send(res, 200, { order: orders[idx], message: "Order status updated." });
-  }
-  if (req.method === "GET" && url === "/api/admin/customers") {
-    const customers = readAllCustomers();
-    const orders = readAllOrders();
-    const safeCustomers = customers.map((c) => {
-      const customerOrders = orders.filter((o) => o.customerId === c.id);
-      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
-      return {
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        phone: c.phone,
-        emailVerified: c.emailVerified,
-        createdAt: c.createdAt,
-        addressesCount: c.addresses ? c.addresses.length : 0,
-        ordersCount: customerOrders.length,
-        totalSpent
-      };
-    });
-    return send(res, 200, { customers: safeCustomers });
-  }
-  if (req.method === "POST" && url === "/api/admin/upload") {
-    const dataUri = String(body.dataUri || "");
-    const fileName = String(body.fileName || `asset_${Date.now()}.png`).replace(/[^a-zA-Z0-9_.-]/g, "_");
-    if (!dataUri.startsWith("data:image/")) {
-      return send(res, 400, { error: "Invalid image format. Expected base64 data URI." });
-    }
-    const matches = dataUri.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
-    if (!matches) {
-      return send(res, 400, { error: "Malformed image data URI." });
-    }
-    const buffer = Buffer.from(matches[2], "base64");
-    if (buffer.length > 10 * 1024 * 1024) {
-      return send(res, 400, { error: "Image exceeds 10MB limit." });
-    }
-    const publicUploads = resolve6(process.cwd(), "public", "uploads");
-    if (!existsSync5(publicUploads)) mkdirSync5(publicUploads, { recursive: true });
-    const finalName = `upload_${Date.now()}_${fileName}`;
-    writeFileSync5(resolve6(publicUploads, finalName), buffer);
-    return send(res, 200, {
-      url: `/uploads/${finalName}`,
-      size: buffer.length,
-      name: finalName
-    });
-  }
-  if (req.method === "GET" && url === "/api/admin/audit") {
-    return send(res, 200, { logs: getAuditLogs(100) });
-  }
-  if (req.method === "GET" && url === "/api/admin/settings") {
-    return send(res, 200, { settings: readSettings() });
-  }
-  if (req.method === "PUT" && url === "/api/admin/settings") {
-    const current = readSettings();
-    const updated = writeSettings({
-      whatsapp: {
-        ...current.whatsapp,
-        ...body.whatsapp || body
-      }
-    });
-    logAdminAction({
-      adminId: admin.id,
-      adminName: admin.name,
-      action: "update_settings",
-      targetType: "settings",
-      targetId: "whatsapp",
-      details: { businessPhone: updated.whatsapp.businessPhone }
-    });
-    return send(res, 200, { ok: true, settings: updated, message: "Settings saved successfully." });
-  }
-  if (req.method === "GET" && url === "/api/admin/custom-requests") {
-    return send(res, 200, { requests: readCustomRequests() });
-  }
-  const reqMatch = url.match(/^\/api\/admin\/custom-requests\/([^/]+)$/);
-  if (reqMatch) {
-    const reqId = reqMatch[1];
-    if (req.method === "PUT") {
-      const updated = await updateCustomRequestStatus(reqId, {
-        status: body.status,
-        adminNotes: typeof body.adminNotes === "string" ? body.adminNotes : void 0
-      });
-      if (!updated) return send(res, 404, { error: "Custom request not found." });
-      logAdminAction({
-        adminId: admin.id,
-        adminName: admin.name,
-        action: "update_custom_request",
-        targetType: "custom_request",
-        targetId: reqId,
-        details: { status: updated.status }
-      });
-      return send(res, 200, { ok: true, request: updated, message: "Request status updated." });
-    }
-  }
-  return send(res, 404, { error: "Admin API route not found." });
-}
-
-// server/auth-middleware.ts
-import { createHmac as createHmac2 } from "node:crypto";
-import bcrypt4 from "bcryptjs";
-import jwt2 from "jsonwebtoken";
-
-// server/auth-store.ts
-import { createHash, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import bcrypt3 from "bcryptjs";
-function hashToken(token) {
-  return createHash("sha256").update(token).digest("hex");
-}
-function newToken() {
-  return randomBytes2(32).toString("hex");
-}
-function fromCustomerDbRow(row) {
-  return {
-    id: row.id,
-    name: row.name || "",
-    email: (row.email || "").toLowerCase().trim(),
-    phone: row.phone || "",
-    passwordHash: row.password_hash || "",
-    emailVerified: Boolean(row.email_verified),
-    verifyTokenHash: row.verify_token || null,
-    verifyExpires: row.verify_expires ? Number(row.verify_expires) : null,
-    resetTokenHash: row.reset_token || null,
-    resetExpires: row.reset_expires ? Number(row.reset_expires) : null,
-    createdAt: row.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-    addresses: Array.isArray(row.addresses) ? row.addresses : []
-  };
-}
-function toCustomerDbRow(c) {
-  return {
-    id: c.id,
-    name: c.name,
-    email: c.email.toLowerCase().trim(),
-    phone: c.phone || "",
-    password_hash: c.passwordHash,
-    email_verified: c.emailVerified,
-    verify_token: c.verifyTokenHash,
-    reset_token: c.resetTokenHash,
-    reset_expires: c.resetExpires,
-    addresses: c.addresses || [],
-    updated_at: (/* @__PURE__ */ new Date()).toISOString()
-  };
-}
-async function findByEmail(email) {
-  const cleanEmail = email.toLowerCase().trim();
-  if (!cleanEmail) return null;
-  const { data, error } = await supabase.from("customers").select("*").eq("email", cleanEmail).maybeSingle();
-  if (error) {
-    console.error("[AuthStore] Supabase findByEmail error:", error.message);
-    return null;
-  }
-  return data ? fromCustomerDbRow(data) : null;
-}
-async function findById(id) {
-  if (!id) return null;
-  const { data, error } = await supabase.from("customers").select("*").eq("id", id).maybeSingle();
-  if (error) {
-    console.error("[AuthStore] Supabase findById error:", error.message);
-    return null;
-  }
-  return data ? fromCustomerDbRow(data) : null;
-}
-function publicCustomer(customer) {
-  return {
-    id: customer.id,
-    name: customer.name,
-    email: customer.email,
-    phone: customer.phone,
-    emailVerified: customer.emailVerified
-  };
-}
-async function createCustomer(input) {
-  const email = input.email.toLowerCase().trim();
-  const existing = await findByEmail(email);
-  if (existing) {
-    return { error: "duplicate" };
-  }
-  const verifyToken = newToken();
-  const customer = {
-    id: randomBytes2(12).toString("hex"),
-    name: input.name.trim(),
-    email,
-    phone: input.phone.trim(),
-    passwordHash: await bcrypt3.hash(input.password, 12),
-    emailVerified: false,
-    verifyTokenHash: hashToken(verifyToken),
-    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24,
-    resetTokenHash: null,
-    resetExpires: null,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    addresses: []
-  };
-  const row = toCustomerDbRow(customer);
-  row.created_at = customer.createdAt;
-  const { data, error } = await supabase.from("customers").insert([row]).select();
-  if (error) {
-    console.error("[AuthStore] Supabase createCustomer error:", error.message);
-    throw new Error(`Failed to create account in database: ${error.message}`);
-  }
-  return { customer: fromCustomerDbRow(data[0]), verifyToken };
-}
-async function saveCustomer(updated) {
-  const row = toCustomerDbRow(updated);
-  const { error } = await supabase.from("customers").upsert([row], { onConflict: "id" });
-  if (error) {
-    console.error("[AuthStore] Supabase saveCustomer error:", error.message);
-    throw new Error(`Failed to save customer in database: ${error.message}`);
-  }
-}
-async function updateProfile(customer, input) {
-  const email = input.email.toLowerCase().trim();
-  if (email !== customer.email) {
-    const taken = await findByEmail(email);
-    if (taken && taken.id !== customer.id) return { error: "duplicate" };
-  }
-  const next = {
-    ...customer,
-    name: input.name.trim(),
-    email,
-    phone: input.phone.trim()
-  };
-  await saveCustomer(next);
-  return { customer: next };
-}
-async function issueResetToken(customer) {
-  const resetToken = newToken();
-  await saveCustomer({
-    ...customer,
-    resetTokenHash: hashToken(resetToken),
-    resetExpires: Date.now() + 1e3 * 60 * 30
-  });
-  return resetToken;
-}
-async function findByVerifyToken(token) {
-  const hashed = hashToken(token);
-  const { data, error } = await supabase.from("customers").select("*").eq("verify_token", hashed).maybeSingle();
-  if (error || !data) return null;
-  return fromCustomerDbRow(data);
-}
-async function findByResetToken(token) {
-  const hashed = hashToken(token);
-  const { data, error } = await supabase.from("customers").select("*").eq("reset_token", hashed).maybeSingle();
-  if (error || !data) return null;
-  return fromCustomerDbRow(data);
-}
-async function setPassword(customer, password) {
-  await saveCustomer({
-    ...customer,
-    passwordHash: await bcrypt3.hash(password, 12),
-    resetTokenHash: null,
-    resetExpires: null
-  });
-}
-async function addAddress(customer, input) {
-  const address = { ...input, id: randomBytes2(8).toString("hex") };
-  await saveCustomer({ ...customer, addresses: [...customer.addresses, address] });
-  return address;
-}
-async function updateAddress(customer, addressId, input) {
-  const addresses = customer.addresses.map((address) => address.id === addressId ? { ...input, id: addressId } : address);
-  if (!addresses.some((address) => address.id === addressId)) return null;
-  await saveCustomer({ ...customer, addresses });
-  return addresses.find((address) => address.id === addressId) ?? null;
-}
-async function removeAddress(customer, addressId) {
-  if (!customer.addresses.some((address) => address.id === addressId)) return false;
-  await saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) });
-  return true;
-}
-async function sendEmailOtp(email) {
-  try {
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.toLowerCase().trim(),
-      options: { shouldCreateUser: true }
-    });
-    if (error) {
-      console.warn("[Supabase Auth OTP Send Warning]:", error.message);
-      return { ok: false, error: error.message };
-    }
-    return { ok: true };
-  } catch (err) {
-    console.error("[Supabase Auth OTP Send Exception]:", err);
-    return { ok: false, error: err.message || "Failed to dispatch email verification." };
-  }
-}
-async function verifyEmailOtp(email, token) {
-  const cleanEmail = email.toLowerCase().trim();
-  const cleanToken = token.trim();
-  try {
-    let { data, error } = await supabase.auth.verifyOtp({
-      email: cleanEmail,
-      token: cleanToken,
-      type: "email"
-    });
-    if (error || !data?.user) {
-      const fallback = await supabase.auth.verifyOtp({
-        email: cleanEmail,
-        token: cleanToken,
-        type: "signup"
-      });
-      if (!fallback.error && fallback.data?.user) {
-        data = fallback.data;
-        error = null;
-      }
-    }
-    if (error || !data?.user) {
-      return { ok: false, error: error?.message || "Invalid or expired verification code." };
-    }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message || "Verification failed." };
-  }
-}
-async function sendPasswordResetEmail(email, redirectTo) {
-  try {
-    const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
-      redirectTo
-    });
-    if (error) {
-      console.warn("[Supabase Auth Reset Password Warning]:", error.message);
-      return { ok: false, error: error.message };
-    }
-    return { ok: true };
-  } catch (err) {
-    console.error("[Supabase Auth Reset Password Exception]:", err);
-    return { ok: false, error: err.message || "Failed to dispatch password reset email." };
-  }
-}
-
 // server/order-store.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync6 } from "node:fs";
-import { resolve as resolve7 } from "node:path";
+import { randomBytes as randomBytes5 } from "node:crypto";
 
 // src/data/products.ts
 var img = (id, w = 1200) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=80`;
@@ -1700,37 +1403,277 @@ var products = [
   }
 ];
 
+// src/lib/product-pricing.ts
+function normalizeFestivePercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(100, Math.max(1, Math.round(n)));
+}
+function effectiveSellingPrice(basePrice, festivePercent) {
+  const base = Math.max(0, Math.round(Number(basePrice) || 0));
+  const pct = normalizeFestivePercent(festivePercent);
+  if (!pct) return base;
+  return Math.round(base * (1 - pct / 100));
+}
+
 // src/data/site.ts
 var DEMO_COUPON = {
   code: "WARM10",
   percent: 10
 };
 
-// server/order-store.ts
-var dataDir5 = dataDirectory();
-var storePath = resolve7(dataDir5, "orders.json");
-function ensureStore3() {
-  if (!existsSync6(dataDir5)) mkdirSync6(dataDir5, { recursive: true });
-  if (!existsSync6(storePath)) writeFileSync6(storePath, "[]", "utf8");
+// server/auth-store.ts
+import { createHash, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
+import bcrypt2 from "bcryptjs";
+function hashToken(token) {
+  return createHash("sha256").update(token).digest("hex");
 }
-function readAll() {
-  ensureStore3();
-  try {
-    return JSON.parse(readFileSync6(storePath, "utf8")).map(normaliseOrder);
-  } catch {
-    return [];
+function newToken() {
+  return randomBytes4(32).toString("hex");
+}
+function fromCustomerDbRow(row) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    email: (row.email || "").toLowerCase().trim(),
+    phone: row.phone || "",
+    passwordHash: row.password_hash || "",
+    emailVerified: Boolean(row.email_verified),
+    verifyTokenHash: row.verify_token || null,
+    verifyExpires: row.verify_expires ? Number(row.verify_expires) : null,
+    resetTokenHash: row.reset_token || null,
+    resetExpires: row.reset_expires ? Number(row.reset_expires) : null,
+    createdAt: row.created_at || (/* @__PURE__ */ new Date()).toISOString(),
+    addresses: Array.isArray(row.addresses) ? row.addresses : []
+  };
+}
+function toCustomerDbRow(c) {
+  return {
+    id: c.id,
+    name: c.name,
+    email: c.email.toLowerCase().trim(),
+    phone: c.phone || "",
+    password_hash: c.passwordHash,
+    email_verified: c.emailVerified,
+    verify_token: c.verifyTokenHash,
+    reset_token: c.resetTokenHash,
+    reset_expires: c.resetExpires,
+    addresses: c.addresses || [],
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+async function findByEmail(email) {
+  const cleanEmail = email.toLowerCase().trim();
+  if (!cleanEmail) return null;
+  const { data, error } = await supabase.from("customers").select("*").eq("email", cleanEmail).maybeSingle();
+  if (error) {
+    console.error("[AuthStore] Supabase findByEmail error:", error.message);
+    return null;
+  }
+  return data ? fromCustomerDbRow(data) : null;
+}
+async function findById(id) {
+  if (!id) return null;
+  const { data, error } = await supabase.from("customers").select("*").eq("id", id).maybeSingle();
+  if (error) {
+    console.error("[AuthStore] Supabase findById error:", error.message);
+    return null;
+  }
+  return data ? fromCustomerDbRow(data) : null;
+}
+function publicCustomer(customer) {
+  return {
+    id: customer.id,
+    name: customer.name,
+    email: customer.email,
+    phone: customer.phone,
+    emailVerified: customer.emailVerified
+  };
+}
+async function createCustomer(input) {
+  const email = input.email.toLowerCase().trim();
+  const existing = await findByEmail(email);
+  if (existing) {
+    return { error: "duplicate" };
+  }
+  const verifyToken = newToken();
+  const customer = {
+    id: randomBytes4(12).toString("hex"),
+    name: input.name.trim(),
+    email,
+    phone: input.phone.trim(),
+    passwordHash: await bcrypt2.hash(input.password, 12),
+    emailVerified: false,
+    verifyTokenHash: hashToken(verifyToken),
+    verifyExpires: Date.now() + 1e3 * 60 * 60 * 24,
+    resetTokenHash: null,
+    resetExpires: null,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    addresses: []
+  };
+  const row = toCustomerDbRow(customer);
+  row.created_at = customer.createdAt;
+  const { data, error } = await supabase.from("customers").insert([row]).select();
+  if (error) {
+    console.error("[AuthStore] Supabase createCustomer error:", error.message);
+    throw new Error(`Failed to create account in database: ${error.message}`);
+  }
+  return { customer: fromCustomerDbRow(data[0]), verifyToken };
+}
+async function saveCustomer(updated) {
+  const row = toCustomerDbRow(updated);
+  const { error } = await supabase.from("customers").upsert([row], { onConflict: "id" });
+  if (error) {
+    console.error("[AuthStore] Supabase saveCustomer error:", error.message);
+    throw new Error(`Failed to save customer in database: ${error.message}`);
   }
 }
-function normaliseOrder(order) {
+async function updateProfile(customer, input) {
+  const email = input.email.toLowerCase().trim();
+  if (email !== customer.email) {
+    const taken = await findByEmail(email);
+    if (taken && taken.id !== customer.id) return { error: "duplicate" };
+  }
+  const next = {
+    ...customer,
+    name: input.name.trim(),
+    email,
+    phone: input.phone.trim()
+  };
+  await saveCustomer(next);
+  return { customer: next };
+}
+async function issueResetToken(customer) {
+  const resetToken = newToken();
+  await saveCustomer({
+    ...customer,
+    resetTokenHash: hashToken(resetToken),
+    resetExpires: Date.now() + 1e3 * 60 * 30
+  });
+  return resetToken;
+}
+async function findByVerifyToken(token) {
+  const hashed = hashToken(token);
+  const { data, error } = await supabase.from("customers").select("*").eq("verify_token", hashed).maybeSingle();
+  if (error || !data) return null;
+  return fromCustomerDbRow(data);
+}
+async function findByResetToken(token) {
+  const hashed = hashToken(token);
+  const { data, error } = await supabase.from("customers").select("*").eq("reset_token", hashed).maybeSingle();
+  if (error || !data) return null;
+  return fromCustomerDbRow(data);
+}
+async function setPassword(customer, password) {
+  await saveCustomer({
+    ...customer,
+    passwordHash: await bcrypt2.hash(password, 12),
+    resetTokenHash: null,
+    resetExpires: null
+  });
+}
+async function addAddress(customer, input) {
+  const address = { ...input, id: randomBytes4(8).toString("hex") };
+  await saveCustomer({ ...customer, addresses: [...customer.addresses, address] });
+  return address;
+}
+async function updateAddress(customer, addressId, input) {
+  const addresses = customer.addresses.map((address) => address.id === addressId ? { ...input, id: addressId } : address);
+  if (!addresses.some((address) => address.id === addressId)) return null;
+  await saveCustomer({ ...customer, addresses });
+  return addresses.find((address) => address.id === addressId) ?? null;
+}
+async function removeAddress(customer, addressId) {
+  if (!customer.addresses.some((address) => address.id === addressId)) return false;
+  await saveCustomer({ ...customer, addresses: customer.addresses.filter((address) => address.id !== addressId) });
+  return true;
+}
+async function sendEmailOtp(email) {
+  try {
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.toLowerCase().trim(),
+      options: { shouldCreateUser: true }
+    });
+    if (error) {
+      console.warn("[Supabase Auth OTP Send Warning]:", error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("[Supabase Auth OTP Send Exception]:", err);
+    return { ok: false, error: err.message || "Failed to dispatch email verification." };
+  }
+}
+async function verifyEmailOtp(email, token) {
+  const cleanEmail = email.toLowerCase().trim();
+  const cleanToken = token.trim();
+  try {
+    let { data, error } = await supabase.auth.verifyOtp({
+      email: cleanEmail,
+      token: cleanToken,
+      type: "email"
+    });
+    if (error || !data?.user) {
+      const fallback = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: "signup"
+      });
+      if (!fallback.error && fallback.data?.user) {
+        data = fallback.data;
+        error = null;
+      }
+    }
+    if (error || !data?.user) {
+      return { ok: false, error: error?.message || "Invalid or expired verification code." };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message || "Verification failed." };
+  }
+}
+async function sendPasswordResetEmail(email, redirectTo) {
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+      redirectTo
+    });
+    if (error) {
+      console.warn("[Supabase Auth Reset Password Warning]:", error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("[Supabase Auth Reset Password Exception]:", err);
+    return { ok: false, error: err.message || "Failed to dispatch password reset email." };
+  }
+}
+
+// server/order-store.ts
+var BESPOKE_COMMISSION_PRODUCT_ID = "prod_bespoke_commission";
+function normaliseOrder(row) {
   return {
-    ...order,
-    contact: order.contact ?? null,
-    cartFingerprint: order.cartFingerprint ?? "",
-    amountPaise: order.amountPaise ?? Math.round((order.total || 0) * 100),
-    razorpayOrderId: order.razorpayOrderId ?? null,
-    razorpayPaymentId: order.razorpayPaymentId ?? null,
-    paymentError: order.paymentError ?? null,
-    paymentMethod: order.paymentMethod ?? null
+    id: row.id,
+    number: row.number,
+    customerId: row.customer_id ?? row.customerId,
+    createdAt: row.created_at ?? row.createdAt,
+    items: Array.isArray(row.items) ? row.items : [],
+    subtotal: Number(row.subtotal) || 0,
+    discount: Number(row.discount) || 0,
+    total: Number(row.total) || 0,
+    coupon: row.coupon ?? null,
+    paymentStatus: row.payment_status ?? row.paymentStatus ?? "pending",
+    fulfilmentStatus: row.fulfilment_status ?? row.fulfilmentStatus ?? "placed",
+    shippingAddress: row.address ?? row.shippingAddress ?? null,
+    deliveryMethod: row.delivery_method ?? row.deliveryMethod ?? null,
+    trackingNumber: row.tracking_number ?? row.trackingNumber ?? null,
+    estimatedDelivery: row.estimated_delivery ?? row.estimatedDelivery ?? null,
+    contact: row.contact ?? null,
+    cartFingerprint: row.checkout_key ?? row.cartFingerprint ?? "",
+    amountPaise: Math.round((Number(row.total) || 0) * 100),
+    razorpayOrderId: row.razorpay_order_id ?? row.razorpayOrderId ?? null,
+    razorpayPaymentId: row.razorpay_payment_id ?? row.razorpayPaymentId ?? null,
+    paymentError: row.payment_error ?? row.paymentError ?? null,
+    paymentMethod: row.payment_method ?? row.paymentMethod ?? null
   };
 }
 function nextTrackingNumber(order) {
@@ -1742,112 +1685,150 @@ function cartFingerprint(items, coupon, destination) {
   const norm = items.map((item) => `${item.productId}:${item.quantity}:${item.finish ?? ""}`).sort().join(";");
   return `${norm}|${(coupon || "").trim().toUpperCase()}|${destination.trim().toLowerCase()}`;
 }
-function writeAll(orders) {
-  ensureStore3();
-  writeFileSync6(storePath, JSON.stringify(orders, null, 2), "utf8");
-}
-function listOrdersForCustomer(customerId) {
-  return readAll().filter((order) => order.customerId === customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-function getOrderForCustomer(customerId, orderId) {
-  const local = listOrdersForCustomer(customerId).find((order) => order.id === orderId);
-  return local ?? null;
-}
-function getOrderByNumberForCustomer(customerId, number) {
-  const cleaned = number.trim().toUpperCase();
-  return listOrdersForCustomer(customerId).find(
-    (order) => order.number.toUpperCase() === cleaned
-  ) ?? null;
-}
-async function ensureCustomerInSupabase(customerId) {
-  if (!customerId || customerId === "guest") return null;
-  try {
-    const { data: existing } = await supabase.from("customers").select("id").eq("id", customerId).maybeSingle();
-    if (existing?.id) return existing.id;
-    const localUser = await findById(customerId);
-    if (localUser) {
-      const { data: inserted, error } = await supabase.from("customers").insert([{
-        id: localUser.id,
-        name: localUser.name,
-        email: localUser.email,
-        phone: localUser.phone || "",
-        password_hash: localUser.passwordHash || "synced_customer",
-        email_verified: localUser.emailVerified ?? true,
-        addresses: localUser.addresses || [],
-        created_at: localUser.createdAt || (/* @__PURE__ */ new Date()).toISOString()
-      }]).select();
-      if (!error && inserted?.[0]) return inserted[0].id;
-    }
-  } catch (err) {
-    console.warn("[Supabase Customer Link Warning]:", err);
-  }
-  return null;
-}
-async function persistOrderToSupabase(order) {
-  try {
-    const validCustomerId = await ensureCustomerInSupabase(order.customerId);
-    const dbOrder = {
-      id: order.id,
-      number: order.number,
-      customer_id: validCustomerId,
-      items: order.items,
-      address: order.shippingAddress,
-      coupon: order.coupon,
-      subtotal: order.subtotal,
-      discount: order.discount,
-      shipping: 0,
-      tax: 0,
-      total: order.total,
-      payment_method: order.paymentMethod || "demo",
-      payment_status: order.paymentStatus || "pending",
-      fulfilment_status: order.fulfilmentStatus || "placed",
-      razorpay_order_id: order.razorpayOrderId,
-      razorpay_payment_id: order.razorpayPaymentId,
-      created_at: order.createdAt,
-      updated_at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    const { error: oErr } = await supabase.from("orders").upsert([dbOrder], { onConflict: "id" });
-    if (oErr) {
-      console.error("[Supabase Order Upsert Error]:", oErr.message);
-    } else {
-      console.log(`[Supabase Order Saved]: ${order.number} (${order.paymentStatus})`);
-    }
-    if (Array.isArray(order.items) && order.items.length) {
-      const dbItems = order.items.map((it, idx) => ({
-        id: `item_${order.id}_${idx}`,
-        order_id: order.id,
-        product_id: it.productId,
-        quantity: it.quantity,
-        price_at_purchase: it.unitPrice,
-        product_name_snapshot: it.name || "Artisanal Piece",
-        product_sku_snapshot: it.productId || "",
-        variant_details: { finish: it.finish, customization: it.customization }
-      }));
-      const { error: iErr } = await supabase.from("order_items").upsert(dbItems, { onConflict: "id" });
-      if (iErr) {
-        console.warn("[Supabase Order Items Notice]:", iErr.message);
+async function listOrdersForCustomer(customerId) {
+  const customer = await findById(customerId);
+  const email = customer?.email?.toLowerCase().trim() || "";
+  const { data, error } = await supabase.from("orders").select("*").eq("customer_id", customerId).order("created_at", { ascending: false });
+  if (error) throw new Error(`Could not load orders: ${error.message}`);
+  const byId = (data ?? []).map(normaliseOrder);
+  const seen = new Set(byId.map((o) => o.id));
+  if (email) {
+    const { data: emailRows, error: emailError } = await supabase.from("orders").select("*").ilike("contact->>email", email).order("created_at", { ascending: false });
+    if (!emailError && emailRows?.length) {
+      for (const row of emailRows) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id);
+          byId.push(normaliseOrder(row));
+        }
       }
+      byId.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
-  } catch (err) {
-    console.error("[Supabase Order Sync Exception]:", err);
   }
+  return byId;
 }
-async function decrementPurchasedStock(items) {
-  try {
-    for (const item of items) {
-      const { data: prod } = await supabase.from("products").select("id, ready_to_ship_stock, made_to_order").eq("id", item.productId).maybeSingle();
-      if (prod && !prod.made_to_order) {
-        const currentStock = Number(prod.ready_to_ship_stock) || 0;
-        const newStock = Math.max(0, currentStock - item.quantity);
-        await supabase.from("products").update({ ready_to_ship_stock: newStock }).eq("id", item.productId);
-        console.log(`[Supabase Stock Decremented]: Product ${item.productId} stock updated from ${currentStock} to ${newStock}`);
-      }
+async function listAllOrders() {
+  const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false });
+  if (error) throw new Error(`Could not load orders: ${error.message}`);
+  return (data ?? []).map(normaliseOrder);
+}
+async function getOrderForCustomer(customerId, orderId) {
+  const customer = await findById(customerId);
+  const email = customer?.email?.toLowerCase().trim() || "";
+  const { data, error } = await supabase.from("orders").select("*").eq("id", orderId).eq("customer_id", customerId).maybeSingle();
+  if (error) throw new Error(`Could not load order: ${error.message}`);
+  if (data) return normaliseOrder(data);
+  if (!email) return null;
+  const { data: byEmail, error: emailError } = await supabase.from("orders").select("*").eq("id", orderId).ilike("contact->>email", email).maybeSingle();
+  if (emailError) throw new Error(`Could not load order: ${emailError.message}`);
+  return byEmail ? normaliseOrder(byEmail) : null;
+}
+async function getOrderByNumberForCustomer(customerId, number) {
+  const customer = await findById(customerId);
+  const email = customer?.email?.toLowerCase().trim() || "";
+  const trimmed = number.trim();
+  const { data, error } = await supabase.from("orders").select("*").eq("number", trimmed).eq("customer_id", customerId).maybeSingle();
+  if (error) throw new Error(`Could not load order: ${error.message}`);
+  if (data) return normaliseOrder(data);
+  if (!email) return null;
+  const { data: byEmail, error: emailError } = await supabase.from("orders").select("*").eq("number", trimmed).ilike("contact->>email", email).maybeSingle();
+  if (emailError) throw new Error(`Could not load order: ${emailError.message}`);
+  return byEmail ? normaliseOrder(byEmail) : null;
+}
+async function customerPayload(customerId) {
+  if (!customerId || customerId === "guest") throw new Error("A signed-in customer is required.");
+  const localUser = await findById(customerId);
+  if (!localUser) throw new Error("Customer account could not be found.");
+  return {
+    id: localUser.id,
+    name: localUser.name,
+    email: localUser.email,
+    phone: localUser.phone || "",
+    password_hash: localUser.passwordHash || "synced_customer",
+    email_verified: localUser.emailVerified ?? true,
+    addresses: localUser.addresses || [],
+    created_at: localUser.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function resolveProductStock(dbP, fallbackP) {
+  const stock = Number(
+    dbP != null ? dbP.ready_to_ship_stock ?? dbP.readyToShipStock ?? 0 : fallbackP != null ? fallbackP.readyToShipStock ?? 0 : 0
+  );
+  const isMadeToOrder = Boolean(
+    dbP != null ? dbP.made_to_order ?? dbP.madeToOrder ?? true : fallbackP != null ? fallbackP.madeToOrder ?? true : true
+  );
+  return { stock, isMadeToOrder };
+}
+async function validateCartLines(items) {
+  const { data: dbProducts } = await supabase.from("products").select("id,name,ready_to_ship_stock,made_to_order,status");
+  const liveCatalog = dbProducts && dbProducts.length > 0 ? dbProducts : [];
+  const issues = [];
+  for (const line of items) {
+    if (line.quantity < 1) continue;
+    const dbP = liveCatalog.find((entry) => entry.id === line.productId);
+    const fallbackP = products.find((entry) => entry.id === line.productId);
+    const p = dbP || fallbackP;
+    if (!p) {
+      issues.push({
+        productId: line.productId,
+        productName: line.productId,
+        requested: line.quantity,
+        available: 0,
+        madeToOrder: true,
+        reason: "not_found"
+      });
+      continue;
     }
-  } catch (err) {
-    console.warn("[Supabase Stock Decrement Notice]:", err);
+    if (dbP && dbP.status && dbP.status !== "published") {
+      issues.push({
+        productId: line.productId,
+        productName: String(p.name),
+        requested: line.quantity,
+        available: 0,
+        madeToOrder: false,
+        reason: "unpublished"
+      });
+      continue;
+    }
+    const { stock, isMadeToOrder } = resolveProductStock(dbP, fallbackP);
+    if (isMadeToOrder) continue;
+    if (stock <= 0) {
+      issues.push({
+        productId: line.productId,
+        productName: String(p.name),
+        requested: line.quantity,
+        available: 0,
+        madeToOrder: false,
+        reason: "out_of_stock"
+      });
+    } else if (line.quantity > stock) {
+      issues.push({
+        productId: line.productId,
+        productName: String(p.name),
+        requested: line.quantity,
+        available: stock,
+        madeToOrder: false,
+        reason: "insufficient_stock"
+      });
+    }
   }
+  if (issues.length) return { ok: false, issues };
+  return { ok: true, issues: [] };
 }
 async function createOrderFromCart(customerId, input) {
+  const stockCheck = await validateCartLines(input.items.map((line) => ({ productId: line.productId, quantity: line.quantity })));
+  if (!stockCheck.ok) {
+    const first = stockCheck.issues[0];
+    const message = first.reason === "out_of_stock" ? `"${first.productName}" is out of stock. Remove it from your bag or choose made-to-order pieces.` : first.reason === "insufficient_stock" ? `Only ${first.available} unit${first.available === 1 ? "" : "s"} left for "${first.productName}" \u2014 you asked for ${first.requested}.` : first.reason === "not_found" ? "An item in your bag is no longer available." : `"${first.productName}" is not available to buy right now.`;
+    return {
+      error: "insufficient_stock",
+      message,
+      productId: first.productId,
+      productName: first.productName,
+      availableStock: first.available,
+      requestedQuantity: first.requested,
+      issues: stockCheck.issues
+    };
+  }
   const { data: dbProducts } = await supabase.from("products").select("*");
   const liveCatalog = dbProducts && dbProducts.length > 0 ? dbProducts : [];
   const items = [];
@@ -1856,15 +1837,19 @@ async function createOrderFromCart(customerId, input) {
     const fallbackP = products.find((entry) => entry.id === line.productId);
     const p = dbP || fallbackP;
     if (!p || line.quantity < 1) continue;
-    const stock = Number(dbP ? dbP.ready_to_ship_stock ?? dbP.readyToShipStock : 10);
-    const isMadeToOrder = Boolean(dbP ? dbP.made_to_order ?? dbP.madeToOrder : true);
+    const { stock, isMadeToOrder } = resolveProductStock(dbP, fallbackP);
     if (!isMadeToOrder && line.quantity > stock) {
       return {
         error: "insufficient_stock",
-        message: `Only ${stock} unit${stock === 1 ? "" : "s"} available in stock for "${p.name}".`
+        message: `Only ${stock} unit${stock === 1 ? "" : "s"} available in stock for "${p.name}".`,
+        productId: line.productId,
+        productName: String(p.name),
+        availableStock: stock,
+        requestedQuantity: line.quantity
       };
     }
-    const basePrice = Number(p.price) || 0;
+    const festivePct = Number(dbP?.festive_discount_percent ?? fallbackP?.festiveDiscountPercent) || 0;
+    const basePrice = effectiveSellingPrice(Number(p.price) || 0, festivePct);
     const images = Array.isArray(p.images) ? p.images : [];
     const finishes = Array.isArray(p.finishes) ? p.finishes : ["Standard"];
     let itemPrice = basePrice;
@@ -1939,14 +1924,22 @@ async function createOrderFromCart(customerId, input) {
     } else if (code === DEMO_COUPON.code) {
       appliedCoupon = DEMO_COUPON.code;
       discount = Math.round(subtotal * (DEMO_COUPON.percent / 100));
+    } else {
+      const fileCoupon = findCouponByCode(code);
+      if (fileCoupon) {
+        const applied = applyFileCouponDiscount(fileCoupon, subtotal, customerId);
+        if (applied.ok) {
+          appliedCoupon = code;
+          discount = applied.discount;
+        }
+      }
     }
   }
   const coupon = appliedCoupon;
   const total = Math.max(0, subtotal - discount);
-  const orders = readAll();
   const order = {
-    id: randomBytes3(10).toString("hex"),
-    number: `CK${String(orders.length + 10841).padStart(6, "0")}`,
+    id: randomBytes5(10).toString("hex"),
+    number: `CK${randomBytes5(8).toString("hex").toUpperCase()}`,
     customerId,
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
     items,
@@ -1968,90 +1961,766 @@ async function createOrderFromCart(customerId, input) {
     paymentError: null,
     paymentMethod: null
   };
-  orders.push(order);
-  writeAll(orders);
-  await persistOrderToSupabase(order);
-  return { order };
-}
-function findReusableCheckoutOrder(customerId, fingerprint) {
-  return listOrdersForCustomer(customerId).find(
-    (order) => order.cartFingerprint === fingerprint && order.paymentStatus !== "paid" && order.paymentStatus !== "refunded"
-  ) ?? null;
-}
-function saveOrder(next) {
-  const orders = readAll();
-  const index = orders.findIndex((order) => order.id === next.id);
-  if (index === -1) return null;
-  orders[index] = next;
-  writeAll(orders);
-  return next;
-}
-function attachRazorpayOrder(orderId, customerId, razorpayOrderId) {
-  const order = getOrderForCustomer(customerId, orderId);
-  if (!order) return null;
-  const saved = saveOrder({
-    ...order,
-    paymentStatus: order.paymentStatus === "paid" ? "paid" : "pending",
-    razorpayOrderId,
-    paymentError: null
+  const customer = await customerPayload(customerId);
+  const checkoutKey = input.cartFingerprint || `${customerId}:${order.id}`;
+  const { data, error } = await supabase.rpc("create_order_transaction", {
+    p_customer: customer,
+    p_order: {
+      ...order,
+      address: order.shippingAddress,
+      payment_method: order.paymentMethod,
+      payment_status: order.paymentStatus,
+      fulfilment_status: order.fulfilmentStatus,
+      razorpay_order_id: order.razorpayOrderId,
+      razorpay_payment_id: order.razorpayPaymentId,
+      checkout_key: checkoutKey
+    },
+    p_items: order.items
   });
-  if (saved) {
-    void persistOrderToSupabase(saved);
-  }
-  return saved;
+  if (error) throw new Error(`Could not save order: ${error.message}`);
+  if (!data) throw new Error("Could not save order: the database returned no order.");
+  let saved = normaliseOrder(data);
+  const tracking = nextTrackingNumber(saved);
+  const { data: patched, error: patchError } = await supabase.from("orders").update({
+    tracking_number: tracking,
+    estimated_delivery: saved.estimatedDelivery || saved.createdAt,
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  }).eq("id", saved.id).select("*").maybeSingle();
+  if (!patchError && patched) saved = normaliseOrder(patched);
+  else saved = { ...saved, trackingNumber: tracking, estimatedDelivery: saved.estimatedDelivery || saved.createdAt };
+  return { order: saved };
 }
-function markOrderPaymentFailed(orderId, customerId, message) {
-  const order = getOrderForCustomer(customerId, orderId);
-  if (!order || order.paymentStatus === "paid") return order;
-  const saved = saveOrder({
-    ...order,
-    paymentStatus: "failed",
-    paymentError: message
-  });
-  if (saved) {
-    void persistOrderToSupabase(saved);
-  }
-  return saved;
+function tryRedeemOrderCoupon(customerId, couponCode) {
+  if (!couponCode?.trim()) return;
+  const fileCoupon = findCouponByCode(couponCode);
+  if (fileCoupon?.personal) redeemPersonalCoupon(couponCode, customerId);
+}
+async function findReusableCheckoutOrder(customerId, fingerprint) {
+  const { data, error } = await supabase.from("orders").select("*").eq("customer_id", customerId).eq("checkout_key", fingerprint).neq("payment_status", "paid").neq("payment_status", "refunded").neq("payment_status", "failed").maybeSingle();
+  if (error) throw new Error(`Could not check for an existing checkout: ${error.message}`);
+  return data ? normaliseOrder(data) : null;
+}
+async function attachRazorpayOrder(orderId, customerId, razorpayOrderId) {
+  const { data, error } = await supabase.from("orders").update({ razorpay_order_id: razorpayOrderId, payment_status: "pending", updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", orderId).eq("customer_id", customerId).neq("payment_status", "paid").select("*").maybeSingle();
+  if (error) throw new Error(`Could not attach payment order: ${error.message}`);
+  return data ? normaliseOrder(data) : null;
+}
+async function markOrderPaymentFailed(orderId, customerId, message) {
+  const { data, error } = await supabase.from("orders").update({ payment_status: "failed", payment_error: message, updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", orderId).eq("customer_id", customerId).neq("payment_status", "paid").select("*").maybeSingle();
+  if (error) throw new Error(`Could not save payment failure: ${error.message}`);
+  return data ? normaliseOrder(data) : null;
 }
 async function markOrderPaid(customerId, input) {
-  const order = getOrderForCustomer(customerId, input.orderId);
-  if (!order) return { error: "missing" };
-  if (order.razorpayOrderId !== input.razorpayOrderId) return { error: "mismatch" };
-  if (order.paymentStatus === "paid") return { order };
-  const paid = saveOrder({
-    ...order,
-    paymentStatus: "paid",
-    fulfilmentStatus: order.fulfilmentStatus === "placed" ? "confirmed" : order.fulfilmentStatus,
-    razorpayPaymentId: input.razorpayPaymentId,
-    paymentMethod: input.paymentMethod ?? order.paymentMethod,
-    deliveryMethod: input.deliveryMethod ?? order.deliveryMethod,
-    trackingNumber: nextTrackingNumber(order),
-    paymentError: null
+  const { data, error } = await supabase.rpc("mark_order_paid_transaction", {
+    p_order_id: input.orderId,
+    p_customer_id: customerId,
+    p_razorpay_order_id: input.razorpayOrderId,
+    p_razorpay_payment_id: input.razorpayPaymentId,
+    p_payment_method: input.paymentMethod ?? "razorpay",
+    p_delivery_method: input.deliveryMethod ?? null
   });
-  if (!paid) return { error: "missing" };
-  await persistOrderToSupabase(paid);
-  await decrementPurchasedStock(paid.items);
-  return { order: paid };
+  if (error) throw new Error(`Could not save payment: ${error.message}`);
+  if (!data) return { error: "missing" };
+  return { order: normaliseOrder(data) };
 }
 async function markCashOnDelivery(customerId, input) {
-  const order = getOrderForCustomer(customerId, input.orderId);
-  if (!order) return { error: "missing" };
-  if (order.razorpayOrderId !== input.razorpayOrderId) return { error: "mismatch" };
-  if (order.paymentStatus === "paid") return { order };
-  const next = saveOrder({
-    ...order,
-    paymentStatus: "pending",
-    fulfilmentStatus: order.fulfilmentStatus === "placed" ? "confirmed" : order.fulfilmentStatus,
-    paymentMethod: "cash",
-    deliveryMethod: "Cash on delivery",
-    trackingNumber: nextTrackingNumber(order),
-    paymentError: null
+  const { data, error } = await supabase.rpc("mark_order_cash_transaction", {
+    p_order_id: input.orderId,
+    p_customer_id: customerId,
+    p_razorpay_order_id: input.razorpayOrderId
   });
-  if (!next) return { error: "missing" };
-  await persistOrderToSupabase(next);
-  await decrementPurchasedStock(next.items);
-  return { order: next };
+  if (error) throw new Error(`Could not save cash-on-delivery order: ${error.message}`);
+  return data ? { order: normaliseOrder(data) } : { error: "missing" };
 }
+async function createOrderFromBespokeQuote(customerId, input) {
+  const amount = Math.round(Number(input.quoteAmount));
+  if (!Number.isFinite(amount) || amount < 1) {
+    return { error: "invalid_quote", message: "A valid commission amount is required." };
+  }
+  await supabase.from("products").upsert(
+    [
+      {
+        id: BESPOKE_COMMISSION_PRODUCT_ID,
+        slug: "bespoke-commission",
+        name: "Bespoke atelier commission",
+        sku: "CK-BESPOKE",
+        price: 0,
+        category: "Custom",
+        category_id: "cat_sofas",
+        space: "living",
+        status: "archived",
+        made_to_order: true,
+        ready_to_ship_stock: 0
+      }
+    ],
+    { onConflict: "id" }
+  );
+  const checkoutKey = `bespoke:${input.customRequestId}`;
+  const reuse = await findReusableCheckoutOrder(customerId, checkoutKey);
+  if (reuse) {
+    await linkCustomRequestOrder(input.customRequestId, reuse.id);
+    return { order: reuse };
+  }
+  const items = [
+    {
+      productId: BESPOKE_COMMISSION_PRODUCT_ID,
+      name: `Bespoke \xB7 ${input.productName}`,
+      slug: "bespoke-commission",
+      image: input.image || "/hero-living-hd.jpg",
+      finish: "Atelier commission",
+      quantity: 1,
+      unitPrice: amount,
+      customization: {
+        customRequestId: input.customRequestId,
+        type: "bespoke",
+        sourceProductId: input.productId || null
+      }
+    }
+  ];
+  const subtotal = amount;
+  const order = {
+    id: randomBytes5(10).toString("hex"),
+    number: `CK${randomBytes5(8).toString("hex").toUpperCase()}`,
+    customerId,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    items,
+    subtotal,
+    discount: 0,
+    total: subtotal,
+    coupon: null,
+    paymentStatus: "pending",
+    fulfilmentStatus: "placed",
+    shippingAddress: input.address,
+    deliveryMethod: null,
+    trackingNumber: null,
+    estimatedDelivery: null,
+    contact: input.contact,
+    cartFingerprint: checkoutKey,
+    amountPaise: Math.round(subtotal * 100),
+    razorpayOrderId: null,
+    razorpayPaymentId: null,
+    paymentError: null,
+    paymentMethod: null
+  };
+  const customer = await customerPayload(customerId);
+  const { data, error } = await supabase.rpc("create_order_transaction", {
+    p_customer: customer,
+    p_order: {
+      ...order,
+      address: order.shippingAddress,
+      payment_method: order.paymentMethod,
+      payment_status: order.paymentStatus,
+      fulfilment_status: order.fulfilmentStatus,
+      razorpay_order_id: order.razorpayOrderId,
+      razorpay_payment_id: order.razorpayPaymentId,
+      checkout_key: checkoutKey
+    },
+    p_items: order.items
+  });
+  if (error) throw new Error(`Could not save commission order: ${error.message}`);
+  if (!data) throw new Error("Could not save commission order: the database returned no order.");
+  let saved = normaliseOrder(data);
+  const tracking = nextTrackingNumber(saved);
+  const { data: patched, error: patchError } = await supabase.from("orders").update({
+    tracking_number: tracking,
+    estimated_delivery: saved.estimatedDelivery || saved.createdAt,
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  }).eq("id", saved.id).select("*").maybeSingle();
+  if (!patchError && patched) saved = normaliseOrder(patched);
+  else saved = { ...saved, trackingNumber: tracking, estimatedDelivery: saved.estimatedDelivery || saved.createdAt };
+  await linkCustomRequestOrder(input.customRequestId, saved.id);
+  return { order: saved };
+}
+
+// server/admin-api-handler.ts
+var IST = "Asia/Kolkata";
+function calendarDayInZone(iso, timeZone = IST) {
+  const stamp = new Date(iso);
+  if (Number.isNaN(stamp.getTime())) return "";
+  return stamp.toLocaleDateString("en-CA", { timeZone });
+}
+function paidOrderTotal(order) {
+  return order.paymentStatus === "paid" ? order.total : 0;
+}
+var ADMIN_COOKIE = "ck_admin_session";
+function send(res, status, data) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(data));
+  return true;
+}
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key) out[key] = decodeURIComponent(rest.join("="));
+  }
+  return out;
+}
+function cookieFlags() {
+  return process.env.VERCEL ? "HttpOnly; Path=/; SameSite=Lax; Secure" : "HttpOnly; Path=/; SameSite=Lax";
+}
+function setAdminSession(res, token) {
+  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=${token}; ${cookieFlags()}; Max-Age=${60 * 60 * 24 * 7}`);
+}
+function clearAdminSession(res) {
+  res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=; ${cookieFlags()}; Max-Age=0`);
+}
+function currentAdmin(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token2 = authHeader.slice(7).trim();
+    const admin = verifyAdminToken(token2);
+    if (admin) return admin;
+  }
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[ADMIN_COOKIE];
+  if (token) {
+    return verifyAdminToken(token);
+  }
+  return null;
+}
+function readAllCustomers() {
+  try {
+    const p = resolve7(dataDirectory(), "customers.json");
+    if (existsSync6(p)) {
+      return JSON.parse(readFileSync5(p, "utf8"));
+    }
+  } catch {
+  }
+  return [];
+}
+async function handleAdminApi(req, res, url, body) {
+  if (req.method === "POST" && url === "/api/admin/auth/login") {
+    const email = String(body.email || "").trim();
+    const password = String(body.password || "");
+    if (!email || !password) {
+      return send(res, 400, { error: "Please enter administrator email and password." });
+    }
+    const admin2 = findAdminByEmail(email);
+    if (!admin2) {
+      return send(res, 401, { error: "Invalid administrator credentials." });
+    }
+    const matches = await bcrypt3.compare(password, admin2.passwordHash);
+    if (!matches) {
+      return send(res, 401, { error: "Invalid administrator credentials." });
+    }
+    const token = signAdminToken(admin2);
+    setAdminSession(res, token);
+    logAdminAction({
+      adminId: admin2.id,
+      adminName: admin2.name,
+      action: "login",
+      targetType: "admin_session",
+      targetId: admin2.id
+    });
+    return send(res, 200, {
+      admin: publicAdmin(admin2),
+      token,
+      message: "Welcome back, " + admin2.name
+    });
+  }
+  if (req.method === "POST" && url === "/api/admin/auth/logout") {
+    clearAdminSession(res);
+    return send(res, 200, { ok: true, message: "Signed out successfully." });
+  }
+  const admin = currentAdmin(req);
+  if (!admin) {
+    return send(res, 401, { error: "Unauthorized. Admin session required." });
+  }
+  if (req.method === "GET" && url === "/api/admin/auth/me") {
+    return send(res, 200, { admin: publicAdmin(admin) });
+  }
+  if (req.method === "GET" && url === "/api/admin/dashboard/stats") {
+    const orders = await listAllOrders();
+    const products2 = await readProducts();
+    const customRequests = await listAllCustomRequests();
+    const todayIst = calendarDayInZone((/* @__PURE__ */ new Date()).toISOString());
+    const monthIst = todayIst.slice(0, 7);
+    const todayOrders = orders.filter((o) => o.createdAt && calendarDayInZone(o.createdAt) === todayIst);
+    const monthOrders = orders.filter((o) => {
+      const day = calendarDayInZone(o.createdAt);
+      return day && day.startsWith(monthIst);
+    });
+    const todaySales = todayOrders.reduce((sum, o) => sum + paidOrderTotal(o), 0);
+    const monthlySales = monthOrders.reduce((sum, o) => sum + paidOrderTotal(o), 0);
+    const totalRevenue = orders.reduce((sum, o) => sum + paidOrderTotal(o), 0);
+    const pendingOrders = orders.filter((o) => o.fulfilmentStatus !== "delivered").length;
+    const deliveredOrders = orders.filter((o) => o.fulfilmentStatus === "delivered").length;
+    const lowStockProducts = products2.filter(
+      (p) => !p.madeToOrder && p.status !== "archived" && p.readyToShipStock <= p.lowStockThreshold
+    );
+    const { data: customerRows, error: customerCountError } = await supabase.from("customers").select("id");
+    if (customerCountError) {
+      console.warn("[AdminDashboard] customer count error:", customerCountError.message);
+    }
+    const customersFromOrders = new Set(orders.map((o) => o.customerId).filter(Boolean)).size;
+    const customerCount = Math.max(customerRows?.length ?? 0, customersFromOrders, readAllCustomers().length);
+    const pendingEnquiriesCount = customRequests.filter((r) => r.status === "new" || r.status === "under_review").length;
+    const approvedAwaitingPayment = customRequests.filter(
+      (r) => r.status === "approved" && r.paymentStatus !== "paid" && Number(r.quoteAmount) > 0
+    );
+    const recentApprovedCommissions = customRequests.filter((r) => r.status === "approved").slice(0, 8).map((r) => ({
+      id: r.id,
+      productName: r.productName,
+      customerName: r.customerName,
+      quoteAmount: r.quoteAmount,
+      paymentStatus: r.paymentStatus || "none",
+      updatedAt: r.updatedAt
+    }));
+    return send(res, 200, {
+      todaySales,
+      todayOrdersCount: todayOrders.length,
+      monthlySales,
+      totalRevenue,
+      totalOrders: orders.length,
+      pendingOrders,
+      deliveredOrders,
+      customerCount,
+      totalProducts: products2.length,
+      lowStockCount: lowStockProducts.length,
+      lowStockProducts: lowStockProducts.slice(0, 5),
+      pendingEnquiriesCount,
+      approvedAwaitingPaymentCount: approvedAwaitingPayment.length,
+      recentApprovedCommissions,
+      recentOrders: orders.slice(0, 6),
+      recentAudit: getAuditLogs(5)
+    });
+  }
+  if (req.method === "GET" && url === "/api/admin/products") {
+    try {
+      const products2 = await readProducts();
+      return send(res, 200, { products: products2 });
+    } catch (err) {
+      return send(res, 500, { error: err.message || "Failed to fetch products from Supabase." });
+    }
+  }
+  if (req.method === "POST" && url === "/api/admin/products/festive-discount") {
+    try {
+      const action = String(body.action || "apply");
+      const scope = body.scope === "all" ? "all" : "one";
+      const productId = typeof body.productId === "string" ? body.productId : void 0;
+      if (action === "remove") {
+        const result2 = await setFestiveDiscountForProducts({ percent: null, scope, productId });
+        logAdminAction({
+          adminId: admin.id,
+          adminName: admin.name,
+          action: "remove_festive_discount",
+          targetType: "product",
+          targetId: scope === "all" ? "all" : productId || "",
+          details: { scope, updatedCount: result2.updatedCount }
+        });
+        return send(res, 200, {
+          ok: true,
+          message: scope === "all" ? "Festive discount removed from all products." : "Festive discount removed for this product.",
+          updatedCount: result2.updatedCount
+        });
+      }
+      const percent = Number(body.percent);
+      if (!Number.isFinite(percent) || percent < 1 || percent > 100) {
+        return send(res, 400, { error: "Enter a discount between 1 and 100 percent." });
+      }
+      const discountType = body.discountType === "standard" ? "standard" : "festive";
+      const result = await setFestiveDiscountForProducts({ percent, scope, productId, discountType });
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: "apply_festive_discount",
+        targetType: "product",
+        targetId: scope === "all" ? "all" : productId || "",
+        details: { scope, percent, updatedCount: result.updatedCount }
+      });
+      return send(res, 200, {
+        ok: true,
+        message: scope === "all" ? `Festive ${percent}% discount applied to ${result.updatedCount} products.` : `Festive ${percent}% discount applied to this product.`,
+        updatedCount: result.updatedCount,
+        percent
+      });
+    } catch (err) {
+      return send(res, 500, { error: err.message || "Could not update festive discount." });
+    }
+  }
+  if (req.method === "POST" && url === "/api/admin/products") {
+    try {
+      const created = await createProduct(body);
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: "create_product",
+        targetType: "product",
+        targetId: created.id,
+        details: { name: created.name, sku: created.sku, price: created.price }
+      });
+      return send(res, 201, { product: created, message: "Product created and published to Supabase successfully." });
+    } catch (err) {
+      return send(res, 400, { error: err.message || "Failed to create product in Supabase." });
+    }
+  }
+  const productMatch = url.match(/^\/api\/admin\/products\/([^/]+)$/);
+  if (productMatch) {
+    const prodId = productMatch[1];
+    if (req.method === "GET") {
+      const prod = await findProductById(prodId);
+      if (!prod) return send(res, 404, { error: "Product not found." });
+      return send(res, 200, { product: prod });
+    }
+    if (req.method === "PUT") {
+      try {
+        const updated = await updateProduct(prodId, body);
+        if (!updated) return send(res, 404, { error: "Product not found." });
+        logAdminAction({
+          adminId: admin.id,
+          adminName: admin.name,
+          action: "update_product",
+          targetType: "product",
+          targetId: updated.id,
+          details: { name: updated.name, price: updated.price, status: updated.status }
+        });
+        return send(res, 200, { product: updated, message: "Product updated in Supabase successfully." });
+      } catch (err) {
+        return send(res, 400, { error: err.message || "Failed to update product in Supabase." });
+      }
+    }
+    if (req.method === "DELETE") {
+      try {
+        const deleted = await deleteProduct(prodId);
+        if (!deleted) return send(res, 404, { error: "Product not found." });
+        logAdminAction({
+          adminId: admin.id,
+          adminName: admin.name,
+          action: "delete_product",
+          targetType: "product",
+          targetId: prodId
+        });
+        return send(res, 200, { ok: true, message: "Product removed from catalog." });
+      } catch (err) {
+        return send(res, 400, { error: err.message || "Failed to delete product from Supabase." });
+      }
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/categories") {
+    try {
+      const categories = await readCategories();
+      return send(res, 200, { categories });
+    } catch (err) {
+      return send(res, 500, { error: err.message || "Failed to fetch categories." });
+    }
+  }
+  if (req.method === "POST" && url === "/api/admin/categories") {
+    try {
+      const created = await createCategory(body);
+      return send(res, 201, { category: created });
+    } catch (err) {
+      return send(res, 400, { error: err.message || "Failed to create category." });
+    }
+  }
+  const catMatch = url.match(/^\/api\/admin\/categories\/([^/]+)$/);
+  if (catMatch) {
+    const catId = catMatch[1];
+    if (req.method === "PUT") {
+      try {
+        const updated = await updateCategory(catId, body);
+        if (!updated) return send(res, 404, { error: "Category not found." });
+        return send(res, 200, { category: updated });
+      } catch (err) {
+        return send(res, 400, { error: err.message || "Failed to update category." });
+      }
+    }
+    if (req.method === "DELETE") {
+      try {
+        const ok = await deleteCategory(catId);
+        if (!ok) return send(res, 404, { error: "Category not found." });
+        return send(res, 200, { ok: true });
+      } catch (err) {
+        return send(res, 400, { error: err.message || "Failed to delete category." });
+      }
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/inventory") {
+    const products2 = await readProducts();
+    const inventory = products2.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      category: p.category,
+      readyToShipStock: p.readyToShipStock,
+      lowStockThreshold: p.lowStockThreshold,
+      madeToOrder: p.madeToOrder,
+      leadTimeWeeks: p.leadTimeWeeks,
+      status: p.readyToShipStock <= 0 ? "Out of Stock" : p.readyToShipStock <= p.lowStockThreshold ? "Low Stock" : "In Stock",
+      image: p.images[0] || "",
+      price: p.price
+    }));
+    return send(res, 200, { inventory });
+  }
+  if (req.method === "GET" && url === "/api/admin/coupons") {
+    return send(res, 200, { coupons: readCoupons() });
+  }
+  if (req.method === "POST" && url === "/api/admin/coupons/personal") {
+    const customerId = String(body.customerId || "").trim();
+    const customerName = String(body.customerName || body.name || "Customer").trim();
+    const customerEmail = String(body.customerEmail || body.email || "").trim().toLowerCase();
+    if (!customerId || !customerEmail) {
+      return send(res, 400, { error: "customerId and customerEmail are required." });
+    }
+    const created = createPersonalCoupon({
+      customerId,
+      customerName,
+      customerEmail,
+      type: body.type === "flat" ? "flat" : "percent",
+      value: Number(body.value) || 12,
+      minOrderValue: Number(body.minOrderValue) || 15e3,
+      description: String(body.description || `Personal offer for ${customerName}`),
+      source: "admin"
+    });
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "create_personal_coupon",
+      targetType: "coupon",
+      targetId: created.id,
+      details: { code: created.code, customerEmail }
+    });
+    return send(res, 201, { coupon: created, message: "Personal coupon issued." });
+  }
+  if (req.method === "POST" && url === "/api/admin/coupons") {
+    const created = createCoupon(body);
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "create_coupon",
+      targetType: "coupon",
+      targetId: created.id,
+      details: { code: created.code, value: created.value, type: created.type }
+    });
+    return send(res, 201, { coupon: created, message: "Coupon created." });
+  }
+  const couponMatch = url.match(/^\/api\/admin\/coupons\/([^/]+)$/);
+  if (couponMatch) {
+    const coupId = couponMatch[1];
+    if (req.method === "PUT") {
+      const updated = updateCoupon(coupId, body);
+      if (!updated) return send(res, 404, { error: "Coupon not found." });
+      return send(res, 200, { coupon: updated, message: "Coupon updated." });
+    }
+    if (req.method === "DELETE") {
+      const ok = deleteCoupon(coupId);
+      if (!ok) return send(res, 404, { error: "Coupon not found." });
+      return send(res, 200, { ok: true, message: "Coupon deleted." });
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/banners") {
+    return send(res, 200, { banners: readBanners() });
+  }
+  if (req.method === "POST" && url === "/api/admin/banners") {
+    const created = createBanner(body);
+    return send(res, 201, { banner: created, message: "Promotional banner added." });
+  }
+  const bannerMatch = url.match(/^\/api\/admin\/banners\/([^/]+)$/);
+  if (bannerMatch) {
+    const bannerId = bannerMatch[1];
+    if (req.method === "PUT") {
+      const updated = updateBanner(bannerId, body);
+      if (!updated) return send(res, 404, { error: "Banner not found." });
+      return send(res, 200, { banner: updated, message: "Banner updated." });
+    }
+    if (req.method === "DELETE") {
+      const ok = deleteBanner(bannerId);
+      if (!ok) return send(res, 404, { error: "Banner not found." });
+      return send(res, 200, { ok: true, message: "Banner removed." });
+    }
+  }
+  if (req.method === "GET" && url === "/api/admin/orders") {
+    const orders = await listAllOrders();
+    for (const order of orders) {
+      if (!order.trackingNumber) {
+        const tracking = nextTrackingNumber(order);
+        const estimated = order.estimatedDelivery || order.createdAt;
+        await supabase.from("orders").update({ tracking_number: tracking, estimated_delivery: estimated, updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", order.id);
+        order.trackingNumber = tracking;
+        order.estimatedDelivery = estimated;
+      }
+    }
+    return send(res, 200, { orders });
+  }
+  const orderStatusMatch = url.match(/^\/api\/admin\/orders\/([^/]+)\/status$/);
+  if (orderStatusMatch && req.method === "PUT") {
+    if (admin.role === "editor") {
+      return send(res, 403, { error: "Your admin role cannot update order status." });
+    }
+    const orderId = orderStatusMatch[1];
+    const fulfilmentStatus = String(body.fulfilmentStatus || "placed");
+    const allowedFulfilment = ["placed", "confirmed", "processing", "shipped", "out_for_delivery", "delivered"];
+    if (body.paymentStatus !== void 0) {
+      return send(res, 400, { error: "Payment status can only be changed by verified payment processing." });
+    }
+    if (!allowedFulfilment.includes(fulfilmentStatus)) {
+      return send(res, 400, { error: "Invalid fulfilment status." });
+    }
+    const { data: existingRow } = await supabase.from("orders").select("*").eq("id", orderId).maybeSingle();
+    let existingOrder = existingRow ? normaliseOrder(existingRow) : null;
+    if (!existingOrder) {
+      const byNum = await supabase.from("orders").select("*").eq("number", orderId).maybeSingle();
+      if (byNum.data) existingOrder = normaliseOrder(byNum.data);
+    }
+    if (!existingOrder) return send(res, 404, { error: "Order not found." });
+    const existingOrderResolved = existingOrder;
+    const trackingNumber = String(body.trackingNumber || "").trim() || existingOrderResolved.trackingNumber || nextTrackingNumber(existingOrderResolved);
+    const estimatedDelivery = existingOrderResolved.estimatedDelivery || existingOrderResolved.createdAt;
+    const patch = {
+      fulfilment_status: fulfilmentStatus,
+      tracking_number: trackingNumber,
+      estimated_delivery: estimatedDelivery,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const byId = await supabase.from("orders").update(patch).eq("id", orderId).select("*").maybeSingle();
+    let updated = byId.data;
+    if (byId.error) return send(res, 400, { error: `Could not update order: ${byId.error.message}` });
+    if (!updated) {
+      const byNumber = await supabase.from("orders").update(patch).eq("number", orderId).select("*").maybeSingle();
+      if (byNumber.error) return send(res, 400, { error: `Could not update order: ${byNumber.error.message}` });
+      updated = byNumber.data;
+    }
+    if (!updated) return send(res, 404, { error: "Order not found." });
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "update_order_status",
+      targetType: "order",
+      targetId: updated.id,
+      details: { orderNumber: updated.number, fulfilmentStatus, trackingNumber }
+    });
+    return send(res, 200, { order: normaliseOrder(updated), message: "Order status updated." });
+  }
+  if (req.method === "GET" && url === "/api/admin/customers") {
+    const customers = readAllCustomers();
+    const orders = await listAllOrders();
+    const safeCustomers = customers.map((c) => {
+      const customerOrders = orders.filter((o) => o.customerId === c.id);
+      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.paymentStatus === "paid" ? o.total : 0), 0);
+      return {
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        emailVerified: c.emailVerified,
+        createdAt: c.createdAt,
+        addressesCount: c.addresses ? c.addresses.length : 0,
+        ordersCount: customerOrders.length,
+        totalSpent
+      };
+    });
+    return send(res, 200, { customers: safeCustomers });
+  }
+  if (req.method === "POST" && url === "/api/admin/upload") {
+    const dataUri = String(body.dataUri || "");
+    const fileName = String(body.fileName || `asset_${Date.now()}.png`).replace(/[^a-zA-Z0-9_.-]/g, "_");
+    const bucket = String(body.bucket || "products").replace(/[^a-zA-Z0-9_-]/g, "");
+    const objectPath = String(body.objectPath || fileName).replace(/^\/+/, "");
+    const upsert = body.upsert === true;
+    if (!dataUri.startsWith("data:image/")) {
+      return send(res, 400, { error: "Invalid image format. Expected base64 data URI." });
+    }
+    const matches = dataUri.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+    if (!matches) {
+      return send(res, 400, { error: "Malformed image data URI." });
+    }
+    const buffer = Buffer.from(matches[2], "base64");
+    if (buffer.length > 10 * 1024 * 1024) {
+      return send(res, 400, { error: "Image exceeds 10MB limit." });
+    }
+    const contentType = matches[1] === "jpeg" ? "image/jpeg" : `image/${matches[1]}`;
+    const { error: storageError } = await supabase.storage.from(bucket).upload(objectPath, buffer, {
+      contentType,
+      upsert,
+      cacheControl: "3600"
+    });
+    if (!storageError) {
+      const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+      const supabaseUrl = publicData.publicUrl || `${String(process.env.SUPABASE_URL || "").replace(/\/$/, "")}/storage/v1/object/public/${bucket}/${objectPath}`;
+      return send(res, 200, {
+        url: supabaseUrl,
+        size: buffer.length,
+        name: objectPath,
+        bucket,
+        source: "supabase"
+      });
+    }
+    console.warn("[AdminUpload] Supabase storage upload failed:", storageError.message);
+    const publicUploads = resolve7(process.cwd(), "public", "uploads");
+    if (!existsSync6(publicUploads)) mkdirSync6(publicUploads, { recursive: true });
+    const finalName = `upload_${Date.now()}_${fileName}`;
+    writeFileSync6(resolve7(publicUploads, finalName), buffer);
+    return send(res, 200, {
+      url: `/uploads/${finalName}`,
+      size: buffer.length,
+      name: finalName,
+      source: "local",
+      warning: storageError.message
+    });
+  }
+  if (req.method === "GET" && url === "/api/admin/audit") {
+    return send(res, 200, { logs: getAuditLogs(100) });
+  }
+  if (req.method === "GET" && url === "/api/admin/settings") {
+    return send(res, 200, { settings: readSettings() });
+  }
+  if (req.method === "PUT" && url === "/api/admin/settings") {
+    const current = readSettings();
+    const updated = writeSettings({
+      whatsapp: {
+        ...current.whatsapp,
+        ...body.whatsapp || body
+      }
+    });
+    logAdminAction({
+      adminId: admin.id,
+      adminName: admin.name,
+      action: "update_settings",
+      targetType: "settings",
+      targetId: "whatsapp",
+      details: { businessPhone: updated.whatsapp.businessPhone }
+    });
+    return send(res, 200, { ok: true, settings: updated, message: "Settings saved successfully." });
+  }
+  if (req.method === "GET" && url === "/api/admin/custom-requests") {
+    return send(res, 200, { requests: await listAllCustomRequests() });
+  }
+  const reqMatch = url.match(/^\/api\/admin\/custom-requests\/([^/]+)$/);
+  if (reqMatch) {
+    const reqId = reqMatch[1];
+    if (req.method === "PUT") {
+      let quoteAmount;
+      if (body.quoteAmount === null || body.quoteAmount === "") quoteAmount = null;
+      else if (typeof body.quoteAmount === "number") quoteAmount = body.quoteAmount;
+      else if (typeof body.quoteAmount === "string" && body.quoteAmount.trim()) {
+        const n = Number(body.quoteAmount);
+        quoteAmount = Number.isFinite(n) ? n : null;
+      }
+      const updated = await updateCustomRequestStatus(reqId, {
+        status: body.status,
+        adminNotes: typeof body.adminNotes === "string" ? body.adminNotes : void 0,
+        quoteAmount
+      });
+      if (!updated) return send(res, 404, { error: "Custom request not found." });
+      logAdminAction({
+        adminId: admin.id,
+        adminName: admin.name,
+        action: "update_custom_request",
+        targetType: "custom_request",
+        targetId: reqId,
+        details: { status: updated.status }
+      });
+      return send(res, 200, { ok: true, request: updated, message: "Request status updated." });
+    }
+  }
+  return send(res, 404, { error: "Admin API route not found." });
+}
+
+// server/auth-middleware.ts
+import bcrypt4 from "bcryptjs";
+import jwt2 from "jsonwebtoken";
 
 // server/razorpay.ts
 import { createHmac, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
@@ -2108,7 +2777,26 @@ async function createRazorpayOrder(config, input) {
 
 // server/auth-middleware.ts
 var COOKIE = "ck_session";
-var SECRET = process.env.COUCHKRAFT_AUTH_SECRET || createHmac2("sha256", "couchkraft-local").update("dev").digest("hex");
+function requiredAuthSecret() {
+  const secret = process.env.COUCHKRAFT_AUTH_SECRET?.trim();
+  if (!secret) {
+    throw new Error("COUCHKRAFT_AUTH_SECRET is required for customer session authentication.");
+  }
+  return secret;
+}
+var SECRET = requiredAuthSecret();
+async function readRawBuffer(req, maxBytes = 5 * 1024 * 1024) {
+  if (Buffer.isBuffer(req.body)) return req.body;
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.from(chunk);
+    total += buf.length;
+    if (total > maxBytes) throw new Error("BODY_TOO_LARGE");
+    chunks.push(buf);
+  }
+  return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+}
 async function readBody(req) {
   if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) {
     return req.body;
@@ -2189,6 +2877,9 @@ function originFrom(req) {
   const host = req.headers.host || "localhost:5173";
   return `${proto}://${host}`;
 }
+function demoLoginEnabled(env) {
+  return env.COUCHKRAFT_DEMO_LOGIN_ENABLED === "true" || env.VERCEL_ENV === "preview" || env.NODE_ENV !== "production";
+}
 var checkoutLocks = /* @__PURE__ */ new Set();
 function parseCartItems(body) {
   const rawItems = Array.isArray(body.items) ? body.items : [];
@@ -2218,7 +2909,7 @@ function requestApiPath(req) {
 async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
   const raw = requestApiPath(req);
   const url = raw.startsWith("/api/") || raw === "/api" ? raw : `/api${raw.startsWith("/") ? raw : `/${raw}`}`;
-  if (!url.startsWith("/api/auth") && !url.startsWith("/api/orders") && !url.startsWith("/api/addresses") && !url.startsWith("/api/checkout") && !url.startsWith("/api/admin") && !url.startsWith("/api/products") && !url.startsWith("/api/banners") && !url.startsWith("/api/settings") && !url.startsWith("/api/custom-requests")) {
+  if (!url.startsWith("/api/auth") && !url.startsWith("/api/orders") && !url.startsWith("/api/addresses") && !url.startsWith("/api/checkout") && !url.startsWith("/api/cart") && !url.startsWith("/api/admin") && !url.startsWith("/api/products") && !url.startsWith("/api/banners") && !url.startsWith("/api/coupons") && !url.startsWith("/api/account") && !url.startsWith("/api/settings") && !url.startsWith("/api/custom-requests")) {
     return false;
   }
   try {
@@ -2233,14 +2924,55 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
         }
       });
     }
+    if (req.method === "POST" && url === "/api/custom-requests/upload") {
+      const user = await currentUser(req);
+      if (!user) {
+        return send2(res, 401, { error: "Please sign in to upload reference photos." });
+      }
+      const contentType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+      if (!contentType.startsWith("image/")) {
+        return send2(res, 400, { error: "Please upload an image file (JPG, PNG, or WebP)." });
+      }
+      let buffer;
+      try {
+        buffer = await readRawBuffer(req, 5 * 1024 * 1024);
+      } catch {
+        return send2(res, 413, { error: "Image exceeds 5 MB limit." });
+      }
+      if (!buffer.length) {
+        return send2(res, 400, { error: "Empty upload." });
+      }
+      const headerName = String(req.headers["x-file-name"] || "reference");
+      let fileName = "reference";
+      try {
+        fileName = decodeURIComponent(headerName).replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 80) || "reference";
+      } catch {
+        fileName = "reference";
+      }
+      const extFromType = contentType.replace("image/", "").replace("jpeg", "jpg");
+      const ext = fileName.includes(".") ? fileName.split(".").pop() : extFromType;
+      const objectPath = customRequestObjectPath(user.id, fileName, ext);
+      const uploaded = await uploadPublicImage("custom-requests", objectPath, buffer, contentType);
+      return send2(res, 200, {
+        url: uploaded.url,
+        source: uploaded.source,
+        warning: uploaded.warning
+      });
+    }
     if (req.method === "POST" && url === "/api/custom-requests") {
+      const user = await currentUser(req);
+      if (!user) {
+        return send2(res, 401, { error: "Please sign in to submit a custom request." });
+      }
       const body = await readBody(req);
       const customerName = text(body, "customerName").trim() || text(body, "name").trim();
       const customerPhone = text(body, "customerPhone").trim() || text(body, "phone").trim();
       if (!customerPhone) {
-        return send2(res, 400, { error: "Please enter your phone number so our atelier can follow up." });
+        return send2(res, 400, { error: "Please enter your phone number so we can follow up." });
       }
-      const user = await currentUser(req);
+      const referenceImages = Array.isArray(body.referenceImages) ? body.referenceImages.filter(
+        (v) => typeof v === "string" && isAllowedReferenceImageUrl(v)
+      ) : [];
       const created = await createCustomRequest({
         customerId: user ? user.id : null,
         customerName: customerName || (user ? user.name : "Bespoke Client"),
@@ -2255,19 +2987,28 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
         fabric: text(body, "fabric"),
         color: text(body, "color"),
         budget: text(body, "budget"),
-        notes: text(body, "notes")
+        notes: text(body, "notes"),
+        referenceImages
       });
-      return send2(res, 201, { ok: true, request: created, message: "Your bespoke furniture commission has been safely submitted." });
+      return send2(res, 201, { ok: true, request: created, message: "Your custom quote request was saved." });
     }
     if (url.startsWith("/api/admin")) {
       const body = req.method !== "GET" && req.method !== "HEAD" ? await readBody(req) : {};
-      return handleAdminApi(req, res, url, body);
+      return await handleAdminApi(req, res, url, body);
     }
     if (req.method === "GET" && url === "/api/products") {
       return send2(res, 200, { products: await readProducts() });
     }
     if (req.method === "GET" && url === "/api/banners") {
       return send2(res, 200, { banners: readBanners() });
+    }
+    if (req.method === "GET" && url === "/api/coupons") {
+      const { data, error } = await supabase.from("coupons").select("id, code, type, value, min_order_value, max_discount, start_date, end_date, active, description").eq("active", true);
+      if (error) {
+        console.error("[CouponApi] Supabase read error:", error.message);
+        return send2(res, 502, { error: "Coupons are temporarily unavailable." });
+      }
+      return send2(res, 200, { coupons: data ?? [] });
     }
     if (req.method === "GET" && url === "/api/auth/me") {
       const user = await currentUser(req);
@@ -2301,14 +3042,24 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       if (password !== confirm) return send2(res, 400, { error: "Passwords do not match." });
       const created = await createCustomer({ name, email, phone, password });
       if ("error" in created) return send2(res, 409, { error: "An account with this email already exists." });
+      const welcomeCoupon = createWelcomeCoupon(created.customer.id, created.customer.name, created.customer.email);
       const otpSend = await sendEmailOtp(email);
       if (!otpSend.ok) console.warn("[Register OTP Send Notice]:", otpSend.error);
       return send2(res, 201, {
         ok: true,
+        welcomeCoupon: welcomeCoupon ? {
+          code: welcomeCoupon.code,
+          description: welcomeCoupon.description,
+          value: welcomeCoupon.value,
+          type: welcomeCoupon.type
+        } : null,
         message: otpSend.ok ? "Account created! A 6-digit verification code has been dispatched to your email." : "Account created! If you do not receive a verification code shortly, click Resend."
       });
     }
     if (req.method === "POST" && url === "/api/auth/demo-login") {
+      if (!demoLoginEnabled(runtimeEnv)) {
+        return send2(res, 404, { error: "Demo sign-in is not enabled in this environment." });
+      }
       const demoEmail = "asha.auth@example.com";
       const customer = await findByEmail(demoEmail);
       if (!customer) {
@@ -2466,15 +3217,30 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
     if (req.method === "GET" && url === "/api/orders") {
       const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
-      return send2(res, 200, { orders: listOrdersForCustomer(user.id) });
+      return send2(res, 200, { orders: await listOrdersForCustomer(user.id) });
+    }
+    if (req.method === "POST" && url === "/api/cart/validate") {
+      const body = await readBody(req);
+      const items = parseCartItems(body);
+      if (!items.length) return send2(res, 400, { error: "Your bag is empty." });
+      const result = await validateCartLines(items);
+      return send2(res, result.ok ? 200 : 409, {
+        ok: result.ok,
+        issues: result.issues,
+        message: result.ok ? null : result.issues[0]?.reason === "insufficient_stock" ? `Only ${result.issues[0].available} left for "${result.issues[0].productName}".` : result.issues[0]?.reason === "out_of_stock" ? `"${result.issues[0].productName}" is out of stock.` : "Some items in your bag are no longer available."
+      });
     }
     if (req.method === "GET" && url === "/api/checkout/config") {
       const keys = razorpayConfigFrom(runtimeEnv);
+      const upiVpa = runtimeEnv.COUCHKRAFT_UPI_VPA?.trim() || "couchkraft.demo@oksbi";
+      const payeeName = runtimeEnv.COUCHKRAFT_UPI_PAYEE_NAME?.trim() || "CouchKraft";
       return send2(res, 200, {
         configured: true,
         gateway: keys.ok ? "razorpay" : "demo",
         mode: keys.ok ? "test" : "demo",
         keyId: keys.ok ? keys.config.keyId : null,
+        upiVpa,
+        payeeName,
         error: null
       });
     }
@@ -2507,7 +3273,8 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
           phone
         };
         const fingerprint = cartFingerprint(items, coupon, `${address.line1}|${address.city}|${address.postalCode}`);
-        let order = findReusableCheckoutOrder(user.id, fingerprint);
+        const checkoutKey = `${user.id}:${fingerprint}`;
+        let order = await findReusableCheckoutOrder(user.id, checkoutKey);
         if (!order) {
           const created = await createOrderFromCart(user.id, {
             items,
@@ -2515,25 +3282,42 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
             coupon,
             contact,
             paymentStatus: "pending",
-            cartFingerprint: fingerprint
+            cartFingerprint: checkoutKey
           });
-          if ("error" in created) return send2(res, 400, { error: created.message || "Your bag has no valid pieces to order." });
+          if ("error" in created) {
+            const fail = created;
+            if (fail.error === "insufficient_stock") {
+              return send2(res, 409, {
+                error: fail.message || "Not enough stock.",
+                code: "insufficient_stock",
+                productId: fail.productId,
+                productName: fail.productName,
+                availableStock: fail.availableStock,
+                requestedQuantity: fail.requestedQuantity,
+                issues: fail.issues
+              });
+            }
+            return send2(res, 400, { error: fail.message || "Your bag has no valid pieces to order." });
+          }
           order = created.order;
         }
         if (order.paymentStatus === "paid") {
           return send2(res, 200, { order, alreadyPaid: true, gateway: keys.ok ? "razorpay" : "demo" });
         }
-        if (!order.razorpayOrderId) {
-          if (keys.ok) {
+        const demoRazorpayId = `order_demo_${order.id}`;
+        if (keys.ok) {
+          if (!order.razorpayOrderId || order.razorpayOrderId.startsWith("order_demo_")) {
             const razorpayOrder = await createRazorpayOrder(keys.config, {
               amountPaise: order.amountPaise,
               receipt: order.number,
               notes: { couchkraftOrderId: order.id, customerId: user.id }
             });
-            order = attachRazorpayOrder(order.id, user.id, razorpayOrder.id) || order;
-          } else {
-            order = attachRazorpayOrder(order.id, user.id, `order_demo_${order.id}`) || order;
+            order = await attachRazorpayOrder(order.id, user.id, razorpayOrder.id) || order;
           }
+        } else if (!order.razorpayOrderId || !order.razorpayOrderId.startsWith("order_demo_")) {
+          order = await attachRazorpayOrder(order.id, user.id, demoRazorpayId) || order;
+        } else if (order.paymentStatus === "failed") {
+          order = await attachRazorpayOrder(order.id, user.id, demoRazorpayId) || order;
         }
         return send2(res, 200, {
           gateway: keys.ok ? "razorpay" : "demo",
@@ -2554,9 +3338,6 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
     if (req.method === "POST" && url === "/api/checkout/demo") {
       const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
-      if (razorpayConfigFrom(runtimeEnv).ok) {
-        return send2(res, 400, { error: "Demo gateway is disabled while Razorpay test keys are configured." });
-      }
       const body = await readBody(req);
       const orderId = text(body, "orderId");
       const method = text(body, "method");
@@ -2565,13 +3346,13 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       if (!methods.includes(method)) {
         return send2(res, 400, { error: "Choose card, cash, UPI or net banking." });
       }
-      const existing = getOrderForCustomer(user.id, orderId);
+      const existing = await getOrderForCustomer(user.id, orderId);
       if (!existing) return send2(res, 404, { error: "Order not found." });
-      if (!existing.razorpayOrderId?.startsWith("order_demo_")) {
-        return send2(res, 400, { error: "This order is not using the demo gateway." });
+      if (!existing.razorpayOrderId) {
+        return send2(res, 400, { error: "Payment was not started for this order. Close and tap Continue to payment again." });
       }
       if (action === "fail") {
-        const order = markOrderPaymentFailed(orderId, user.id, "Demo payment failed.");
+        const order = await markOrderPaymentFailed(orderId, user.id, "Demo payment failed.");
         return send2(res, 200, { order, failed: true });
       }
       const labels = {
@@ -2586,6 +3367,8 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
           razorpayOrderId: existing.razorpayOrderId
         });
         if ("error" in result2) return send2(res, 400, { error: "This payment does not match the order on your account." });
+        tryRedeemOrderCoupon(user.id, result2.order.coupon);
+        await markCustomRequestPaidFromOrder(result2.order);
         return send2(res, 200, { order: result2.order });
       }
       const result = await markOrderPaid(user.id, {
@@ -2596,6 +3379,8 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
         deliveryMethod: labels[method]
       });
       if ("error" in result) return send2(res, 400, { error: "This payment does not match the order on your account." });
+      tryRedeemOrderCoupon(user.id, result.order.coupon);
+      await markCustomRequestPaidFromOrder(result.order);
       return send2(res, 200, { order: result.order });
     }
     if (req.method === "POST" && url === "/api/checkout/verify") {
@@ -2617,7 +3402,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
         signature
       });
       if (!valid) {
-        markOrderPaymentFailed(orderId, user.id, "Payment signature could not be verified.");
+        await markOrderPaymentFailed(orderId, user.id, "Payment signature could not be verified.");
         return send2(res, 400, { error: "Payment could not be verified. This order has not been marked as paid." });
       }
       const result = await markOrderPaid(user.id, { orderId, razorpayOrderId, razorpayPaymentId });
@@ -2626,13 +3411,127 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
           error: result.error === "missing" ? "Order not found." : "This payment does not match the order on your account."
         });
       }
+      tryRedeemOrderCoupon(user.id, result.order.coupon);
+      await markCustomRequestPaidFromOrder(result.order);
       return send2(res, 200, { order: result.order });
+    }
+    if (req.method === "GET" && url === "/api/account/custom-requests") {
+      const user = await currentUser(req);
+      if (!user) return send2(res, 401, { error: "Please sign in." });
+      const requests = await listCustomRequestsForCustomer(user.id);
+      return send2(res, 200, { requests });
+    }
+    const customReqMatch = url.match(/^\/api\/account\/custom-requests\/([^/]+)$/);
+    if (customReqMatch && req.method === "GET") {
+      const user = await currentUser(req);
+      if (!user) return send2(res, 401, { error: "Please sign in." });
+      const request = await getCustomRequestForCustomer(user.id, customReqMatch[1]);
+      if (!request) return send2(res, 404, { error: "Custom request not found." });
+      return send2(res, 200, { request });
+    }
+    const bespokePayMatch = url.match(/^\/api\/account\/custom-requests\/([^/]+)\/payment-session$/);
+    if (bespokePayMatch && req.method === "POST") {
+      const user = await currentUser(req);
+      if (!user) return send2(res, 401, { error: "Please sign in to pay." });
+      const keys = razorpayConfigFrom(runtimeEnv);
+      const request = await getCustomRequestForCustomer(user.id, bespokePayMatch[1]);
+      if (!request) return send2(res, 404, { error: "Custom request not found." });
+      if (request.status !== "approved") {
+        return send2(res, 400, { error: "Payment is available once your commission is approved." });
+      }
+      if (request.paymentStatus === "paid") {
+        return send2(res, 200, { alreadyPaid: true, request });
+      }
+      const quoteAmount = Number(request.quoteAmount);
+      if (!Number.isFinite(quoteAmount) || quoteAmount < 1) {
+        return send2(res, 400, { error: "Our atelier has not published your commission amount yet." });
+      }
+      const phone = user.phone || request.customerPhone;
+      if (!phoneOk(phone)) {
+        return send2(res, 400, { error: "Add a phone number on your profile before paying." });
+      }
+      const address = user.addresses[0] || {
+        id: "bespoke",
+        label: "Commission",
+        line1: "Delivery address to be confirmed",
+        line2: "",
+        city: "Bengaluru",
+        region: "Karnataka",
+        postalCode: "560001",
+        country: "India"
+      };
+      const contact = {
+        name: user.name,
+        email: user.email,
+        phone
+      };
+      const thumb = request.referenceImages?.[0] || request.dimensions?.referenceImages?.[0];
+      try {
+        const created = await createOrderFromBespokeQuote(user.id, {
+          customRequestId: request.id,
+          productName: request.productName || "Custom furniture",
+          productId: request.productId,
+          image: thumb,
+          quoteAmount,
+          contact,
+          address
+        });
+        if ("error" in created) {
+          return send2(res, 400, { error: created.message || "Could not start payment." });
+        }
+        let order = created.order;
+        if (order.paymentStatus === "paid") {
+          await markCustomRequestPaidFromOrder(order);
+          return send2(res, 200, { order, alreadyPaid: true, gateway: keys.ok ? "razorpay" : "demo" });
+        }
+        const demoRazorpayId = `order_demo_${order.id}`;
+        if (keys.ok) {
+          if (!order.razorpayOrderId || order.razorpayOrderId.startsWith("order_demo_")) {
+            const razorpayOrder = await createRazorpayOrder(keys.config, {
+              amountPaise: order.amountPaise,
+              receipt: order.number,
+              notes: { couchkraftOrderId: order.id, customerId: user.id, customRequestId: request.id }
+            });
+            order = await attachRazorpayOrder(order.id, user.id, razorpayOrder.id) || order;
+          }
+        } else if (!order.razorpayOrderId || !order.razorpayOrderId.startsWith("order_demo_")) {
+          order = await attachRazorpayOrder(order.id, user.id, demoRazorpayId) || order;
+        }
+        return send2(res, 200, {
+          gateway: keys.ok ? "razorpay" : "demo",
+          keyId: keys.ok ? keys.config.keyId : null,
+          razorpayOrderId: order.razorpayOrderId,
+          amount: order.amountPaise,
+          currency: "INR",
+          order
+        });
+      } catch (error) {
+        return send2(res, 502, {
+          error: error instanceof Error ? error.message : "Payment could not be started."
+        });
+      }
+    }
+    if (req.method === "GET" && url === "/api/account/coupons") {
+      const user = await currentUser(req);
+      if (!user) return send2(res, 401, { error: "Please sign in." });
+      const personal = couponsForCustomer(user.id).map((c) => ({
+        id: c.id,
+        code: c.code,
+        description: c.description,
+        type: c.type,
+        value: c.value,
+        minOrderValue: c.minOrderValue,
+        redeemed: Boolean(c.redeemed),
+        redeemedAt: c.redeemedAt || null,
+        source: c.source || "promo"
+      }));
+      return send2(res, 200, { coupons: personal });
     }
     if (req.method === "POST" && url === "/api/checkout/fail") {
       const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const body = await readBody(req);
-      const order = markOrderPaymentFailed(
+      const order = await markOrderPaymentFailed(
         text(body, "orderId"),
         user.id,
         text(body, "reason") || "Payment failed or was cancelled."
@@ -2660,7 +3559,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
       const number = new URL(req.url || "", "http://localhost").searchParams.get("number") || "";
-      const order = getOrderByNumberForCustomer(user.id, number);
+      const order = await getOrderByNumberForCustomer(user.id, number);
       if (!order) return send2(res, 404, { error: "No matching order was found on this account." });
       return send2(res, 200, { order });
     }
@@ -2668,7 +3567,7 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
     if (orderMatch && req.method === "GET") {
       const user = await currentUser(req);
       if (!user) return send2(res, 401, { error: "Please sign in." });
-      const order = getOrderForCustomer(user.id, orderMatch[1]);
+      const order = await getOrderForCustomer(user.id, orderMatch[1]);
       if (!order) return send2(res, 404, { error: "Order not found." });
       return send2(res, 200, { order });
     }

@@ -7,6 +7,8 @@ import { AuthProvider } from './context/AuthContext'
 import { SiteHeader } from './components/SiteHeader'
 import { SiteFooter } from './components/SiteFooter'
 import { AuthModal } from './components/AuthModal'
+import { FloatingWhatsApp } from './components/FloatingWhatsApp'
+import { WelcomeSignInPromo } from './components/WelcomeSignInPromo'
 import { HomePage } from './pages/HomePage'
 import { ShopPage } from './pages/ShopPage'
 import { ProductPage } from './pages/ProductPage'
@@ -20,6 +22,7 @@ import { OrdersList } from './pages/account/OrdersList'
 import { OrderDetail } from './pages/account/OrderDetail'
 import { TrackOrder } from './pages/account/TrackOrder'
 import { Addresses } from './pages/account/Addresses'
+import { CustomRequestsList } from './pages/account/CustomRequestsList'
 import { VerifyEmailPage } from './pages/VerifyEmailPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
@@ -67,6 +70,7 @@ export default function App() {
                 <Route path="orders/:orderId" element={<OrderDetail />} />
                 <Route path="track" element={<TrackOrder />} />
                 <Route path="addresses" element={<Addresses />} />
+                <Route path="custom-requests" element={<CustomRequestsList />} />
               </Route>
               <Route path="/account/verify" element={<VerifyEmailPage />} />
               <Route path="/account/reset" element={<ResetPasswordPage />} />
@@ -77,6 +81,8 @@ export default function App() {
             <SiteFooter />
           </div>
           <AuthModal />
+          <FloatingWhatsApp />
+          <WelcomeSignInPromo />
         </AuthProvider>
       </BrowserRouter>
     </StoreProvider>

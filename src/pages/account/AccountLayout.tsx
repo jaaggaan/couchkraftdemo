@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { AccountSubnav } from '../../components/AccountSubnav'
 
 export function AccountLayout() {
   const { user, loading, openAuth } = useAuth()
@@ -34,6 +35,7 @@ export function AccountLayout() {
     <main id="main" className="page-wrap account-page">
       <header className="account-welcome">
         <h1>Welcome, {user.name.split(' ')[0]}</h1>
+        <AccountSubnav />
       </header>
       <section className="account-panel">
         <Outlet />

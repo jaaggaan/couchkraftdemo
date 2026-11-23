@@ -12,6 +12,21 @@ export type AuthResponse = {
   message?: string
   needsVerification?: boolean
   devActionUrl?: string
+  welcomeCoupon?: { code: string; description: string; value: number; type: string }
+}
+
+export type PersonalCouponsResponse = {
+  coupons: Array<{
+    id: string
+    code: string
+    description: string
+    type: string
+    value: number
+    minOrderValue: number
+    redeemed: boolean
+    redeemedAt?: string | null
+    source?: string
+  }>
 }
 
 async function request(
@@ -25,8 +40,16 @@ async function request(
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   })
-  const data = (await response.json()) as AuthResponse
-  return { ...data, status: response.status }
+  const raw = await response.text()
+  let data = {} as AuthResponse
+  if (raw) {
+    try {
+      data = JSON.parse(raw) as AuthResponse
+    } catch {
+      return { error: raw.trim() || `Request failed (${response.status})`, status: response.status }
+    }
+  }
+  return { ...data, status: response.status, error: data.error || (response.ok ? undefined : `Request failed (${response.status})`) }
 }
 
 export const authApi = {
@@ -44,4 +67,5 @@ export const authApi = {
   verifyOtp: (email: string, otp: string) => request('/api/auth/verify-otp', { email, otp }),
   reset: (token: string, password: string, confirmPassword: string) =>
     request('/api/auth/reset', { token, password, confirmPassword }),
+  personalCoupons: () => request('/api/account/coupons') as Promise<PersonalCouponsResponse & { status: number; error?: string }>,
 }

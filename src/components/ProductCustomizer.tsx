@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { Product, SelectedCustomization } from '../data/products'
 import { formatPrice } from '../utils/format'
+import { effectiveSellingPrice } from '../lib/product-pricing'
 
 export function ProductCustomizer({
   product,
@@ -45,7 +46,8 @@ export function ProductCustomizer({
   if (selectedFinish) delta += Number(selectedFinish.priceDelta) || 0
   if (selectedMaterial) delta += Number(selectedMaterial.priceDelta) || 0
 
-  const totalPrice = Math.max(0, product.price + delta)
+  const basePrice = effectiveSellingPrice(product.price, product.festiveDiscountPercent)
+  const totalPrice = Math.max(0, basePrice + delta)
 
   useEffect(() => {
     const payload: SelectedCustomization = {
@@ -366,7 +368,8 @@ export function ProductCustomizer({
       }}>
         <div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            Base {formatPrice(product.price)} {delta > 0 && `+ Customization (${formatPrice(delta)})`}
+            Base {formatPrice(basePrice)}{' '}
+            {delta > 0 && `+ Customization (${formatPrice(delta)})`}
           </div>
           <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'Playfair Display', color: '#835022' }}>
             Configured Price: {formatPrice(totalPrice)}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { adminApi } from '../lib/api'
+import { INVENTORY_PLAYBOOK } from '../lib/inventoryPlaybook'
 
 export function InventoryPage() {
   const [items, setItems] = useState<any[]>([])
@@ -29,6 +30,12 @@ export function InventoryPage() {
   }
 
   const handleSaveItem = async (item: any) => {
+    if (!item.madeToOrder && (Number(item.readyToShipStock) || 0) <= 0) {
+      const ok = window.confirm(
+        `"${item.name}" is ready-to-ship with 0 units — shoppers will see out of stock. Save anyway?`,
+      )
+      if (!ok) return
+    }
     setSavingId(item.id)
     setFeedback('')
     try {
@@ -101,6 +108,30 @@ export function InventoryPage() {
             {feedback}
           </div>
         )}
+      </div>
+
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 16px', maxWidth: 720, lineHeight: 1.5 }}>
+        See also <code style={{ fontSize: 11 }}>docs/INVENTORY_PLAYBOOK.md</code> in the repo for the full MTO vs RTS operating guide.
+      </p>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 16,
+          marginBottom: 24,
+        }}
+      >
+        <div style={{ background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 20, color: '#835022', marginBottom: 6, display: 'block' }}>handyman</span>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, fontFamily: 'Playfair Display' }}>{INVENTORY_PLAYBOOK.mtoTitle}</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>{INVENTORY_PLAYBOOK.mtoBody}</p>
+        </div>
+        <div style={{ background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 20, color: '#15803d', marginBottom: 6, display: 'block' }}>local_shipping</span>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, fontFamily: 'Playfair Display' }}>{INVENTORY_PLAYBOOK.rtsTitle}</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>{INVENTORY_PLAYBOOK.rtsBody}</p>
+        </div>
       </div>
 
       {/* Metrics */}
@@ -205,24 +236,49 @@ export function InventoryPage() {
                     <td style={{ padding: '8px 14px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i.sku}</td>
 
                     {/* Stock Input */}
-                    <td style={{ padding: '8px 14px' }}>
+                    <td style={{ padding: '8px 14px', opacity: i.madeToOrder ? 0.45 : 1 }}>
                       <input
                         type="number"
                         min="0"
+                        disabled={Boolean(i.madeToOrder)}
+                        title={i.madeToOrder ? 'Not used while made-to-order is on.' : undefined}
                         value={i.readyToShipStock ?? 0}
                         onChange={(e) => handleStockChange(i.id, 'readyToShipStock', +e.target.value)}
-                        style={{ width: 70, height: 32, padding: '0 8px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--surface-cream)', fontSize: 13, fontWeight: 600, outline: 'none' }}
+                        style={{
+                          width: 70,
+                          height: 32,
+                          padding: '0 8px',
+                          borderRadius: 6,
+                          border: '1px solid var(--border-subtle)',
+                          background: i.madeToOrder ? 'var(--surface-container)' : 'var(--surface-cream)',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          outline: 'none',
+                          cursor: i.madeToOrder ? 'not-allowed' : 'text',
+                        }}
                       />
                     </td>
 
                     {/* Threshold Input */}
-                    <td style={{ padding: '8px 14px' }}>
+                    <td style={{ padding: '8px 14px', opacity: i.madeToOrder ? 0.45 : 1 }}>
                       <input
                         type="number"
                         min="0"
+                        disabled={Boolean(i.madeToOrder)}
+                        title={i.madeToOrder ? 'Not used while made-to-order is on.' : undefined}
                         value={i.lowStockThreshold ?? 2}
                         onChange={(e) => handleStockChange(i.id, 'lowStockThreshold', +e.target.value)}
-                        style={{ width: 60, height: 32, padding: '0 8px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--surface-cream)', fontSize: 13, outline: 'none' }}
+                        style={{
+                          width: 60,
+                          height: 32,
+                          padding: '0 8px',
+                          borderRadius: 6,
+                          border: '1px solid var(--border-subtle)',
+                          background: i.madeToOrder ? 'var(--surface-container)' : 'var(--surface-cream)',
+                          fontSize: 13,
+                          outline: 'none',
+                          cursor: i.madeToOrder ? 'not-allowed' : 'text',
+                        }}
                       />
                     </td>
 

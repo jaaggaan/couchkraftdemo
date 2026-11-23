@@ -9,6 +9,11 @@ export type CheckoutSession = {
   order?: Order
   alreadyPaid?: boolean
   error?: string
+  code?: string
+  productId?: string
+  productName?: string
+  availableStock?: number
+  requestedQuantity?: number
   status: number
 }
 
@@ -25,9 +30,15 @@ async function request<T>(path: string, body?: unknown): Promise<T & { status: n
 
 export const checkoutApi = {
   config: () =>
-    request<{ configured: boolean; gateway: 'demo' | 'razorpay'; mode: string; keyId: string | null; error: string | null }>(
-      '/api/checkout/config',
-    ),
+    request<{
+      configured: boolean
+      gateway: 'demo' | 'razorpay'
+      mode: string
+      keyId: string | null
+      upiVpa?: string
+      payeeName?: string
+      error: string | null
+    }>('/api/checkout/config'),
   session: (payload: {
     items: Array<{ productId: string; quantity: number; finish: string }>
     coupon?: string | null

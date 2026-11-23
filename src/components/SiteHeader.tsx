@@ -4,6 +4,7 @@ import { searchProducts } from '../data/products'
 import { useStore } from '../context/StoreContext'
 import { useAuth } from '../context/AuthContext'
 import { formatPrice } from '../utils/format'
+import { CartLineDiscountNote } from './ProductExtraDiscount'
 import { AccountMenu } from './AccountMenu'
 import { BagIcon, CloseIcon, HeartIcon, MenuIcon, SearchIcon } from './Icons'
 
@@ -117,6 +118,11 @@ export function SiteHeader() {
                     </Link>
                   </p>
                   <p style={{ margin: '1rem 0' }}>
+                    <Link to="/account/custom-requests" onClick={() => setMenuOpen(false)}>
+                      Custom requests
+                    </Link>
+                  </p>
+                  <p style={{ margin: '1rem 0' }}>
                     <button
                       type="button"
                       className="account-signout"
@@ -225,6 +231,7 @@ export function SiteHeader() {
                       <Link to={`/product/${product.slug}`} onClick={() => setCartOpen(false)}>
                         {product.name}
                       </Link>
+                      <CartLineDiscountNote product={product} />
                       <p className="form-note">{finish}</p>
                       {customization && (
                         <p className="form-note" style={{ color: '#835022', fontSize: 11, margin: '2px 0 0' }}>

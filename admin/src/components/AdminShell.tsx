@@ -16,7 +16,7 @@ const nav = [
     { label: 'Promotional Banners', icon: 'ad_units', path: '/banners' },
   ]},
   { section: 'FULFILLMENT', items: [
-    { label: 'Orders', icon: 'local_shipping', path: '/orders' },
+    { label: 'Orders & tracking', icon: 'local_shipping', path: '/orders' },
     { label: 'Customers', icon: 'group', path: '/customers' },
     { label: 'Store Settings', icon: 'settings', path: '/settings' },
   ]},

@@ -1,12 +1,15 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { dataDirectory } from './data-path.ts'
 import { products } from '../src/data/products.ts'
+import { effectiveSellingPrice } from '../src/lib/product-pricing.ts'
+import { applyFileCouponDiscount, findCouponByCode, redeemPersonalCoupon } from './marketing-store.ts'
 import { DEMO_COUPON } from '../src/data/site.ts'
 import type { Address } from './auth-store.ts'
 import { findById } from './auth-store.ts'
 import { supabase } from './supabase-client.ts'
+import { linkCustomRequestOrder } from './custom-request-store.ts'
+
+/** Satisfies order_items FK; display name comes from order line + customization. */
+export const BESPOKE_COMMISSION_PRODUCT_ID = 'prod_bespoke_commission'
 
 export const FULFILMENT_STEPS = [
   'placed',
@@ -62,33 +65,30 @@ export type Order = {
   paymentMethod: string | null
 }
 
-const dataDir = dataDirectory()
-const storePath = resolve(dataDir, 'orders.json')
-
-function ensureStore() {
-  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
-  if (!existsSync(storePath)) writeFileSync(storePath, '[]', 'utf8')
-}
-
-function readAll(): Order[] {
-  ensureStore()
-  try {
-    return (JSON.parse(readFileSync(storePath, 'utf8')) as Order[]).map(normaliseOrder)
-  } catch {
-    return []
-  }
-}
-
-function normaliseOrder(order: Order): Order {
+export function normaliseOrder(row: any): Order {
   return {
-    ...order,
-    contact: order.contact ?? null,
-    cartFingerprint: order.cartFingerprint ?? '',
-    amountPaise: order.amountPaise ?? Math.round((order.total || 0) * 100),
-    razorpayOrderId: order.razorpayOrderId ?? null,
-    razorpayPaymentId: order.razorpayPaymentId ?? null,
-    paymentError: order.paymentError ?? null,
-    paymentMethod: order.paymentMethod ?? null,
+    id: row.id,
+    number: row.number,
+    customerId: row.customer_id ?? row.customerId,
+    createdAt: row.created_at ?? row.createdAt,
+    items: Array.isArray(row.items) ? row.items : [],
+    subtotal: Number(row.subtotal) || 0,
+    discount: Number(row.discount) || 0,
+    total: Number(row.total) || 0,
+    coupon: row.coupon ?? null,
+    paymentStatus: row.payment_status ?? row.paymentStatus ?? 'pending',
+    fulfilmentStatus: row.fulfilment_status ?? row.fulfilmentStatus ?? 'placed',
+    shippingAddress: row.address ?? row.shippingAddress ?? null,
+    deliveryMethod: row.delivery_method ?? row.deliveryMethod ?? null,
+    trackingNumber: row.tracking_number ?? row.trackingNumber ?? null,
+    estimatedDelivery: row.estimated_delivery ?? row.estimatedDelivery ?? null,
+    contact: row.contact ?? null,
+    cartFingerprint: row.checkout_key ?? row.cartFingerprint ?? '',
+    amountPaise: Math.round((Number(row.total) || 0) * 100),
+    razorpayOrderId: row.razorpay_order_id ?? row.razorpayOrderId ?? null,
+    razorpayPaymentId: row.razorpay_payment_id ?? row.razorpayPaymentId ?? null,
+    paymentError: row.payment_error ?? row.paymentError ?? null,
+    paymentMethod: row.payment_method ?? row.paymentMethod ?? null,
   }
 }
 
@@ -110,132 +110,193 @@ export function cartFingerprint(
   return `${norm}|${(coupon || '').trim().toUpperCase()}|${destination.trim().toLowerCase()}`
 }
 
-function writeAll(orders: Order[]) {
-  ensureStore()
-  writeFileSync(storePath, JSON.stringify(orders, null, 2), 'utf8')
+export async function listOrdersForCustomer(customerId: string) {
+  const customer = await findById(customerId)
+  const email = customer?.email?.toLowerCase().trim() || ''
+
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(`Could not load orders: ${error.message}`)
+
+  const byId = (data ?? []).map(normaliseOrder)
+  const seen = new Set(byId.map((o) => o.id))
+
+  if (email) {
+    const { data: emailRows, error: emailError } = await supabase
+      .from('orders')
+      .select('*')
+      .ilike('contact->>email', email)
+      .order('created_at', { ascending: false })
+    if (!emailError && emailRows?.length) {
+      for (const row of emailRows) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id)
+          byId.push(normaliseOrder(row))
+        }
+      }
+      byId.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    }
+  }
+
+  return byId
 }
 
-export function listOrdersForCustomer(customerId: string) {
-  return readAll()
-    .filter((order) => order.customerId === customerId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+export async function listAllOrders() {
+  const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false })
+  if (error) throw new Error(`Could not load orders: ${error.message}`)
+  return (data ?? []).map(normaliseOrder)
 }
 
-export function getOrderForCustomer(customerId: string, orderId: string) {
-  const local = listOrdersForCustomer(customerId).find((order) => order.id === orderId)
-  return local ?? null
+export async function getOrderForCustomer(customerId: string, orderId: string) {
+  const customer = await findById(customerId)
+  const email = customer?.email?.toLowerCase().trim() || ''
+
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('id', orderId)
+    .eq('customer_id', customerId)
+    .maybeSingle()
+  if (error) throw new Error(`Could not load order: ${error.message}`)
+  if (data) return normaliseOrder(data)
+
+  if (!email) return null
+
+  const { data: byEmail, error: emailError } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('id', orderId)
+    .ilike('contact->>email', email)
+    .maybeSingle()
+  if (emailError) throw new Error(`Could not load order: ${emailError.message}`)
+  return byEmail ? normaliseOrder(byEmail) : null
 }
 
-export function getOrderByNumberForCustomer(customerId: string, number: string) {
-  const cleaned = number.trim().toUpperCase()
-  return (
-    listOrdersForCustomer(customerId).find(
-      (order) => order.number.toUpperCase() === cleaned,
-    ) ?? null
+export async function getOrderByNumberForCustomer(customerId: string, number: string) {
+  const customer = await findById(customerId)
+  const email = customer?.email?.toLowerCase().trim() || ''
+  const trimmed = number.trim()
+
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('number', trimmed)
+    .eq('customer_id', customerId)
+    .maybeSingle()
+  if (error) throw new Error(`Could not load order: ${error.message}`)
+  if (data) return normaliseOrder(data)
+
+  if (!email) return null
+
+  const { data: byEmail, error: emailError } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('number', trimmed)
+    .ilike('contact->>email', email)
+    .maybeSingle()
+  if (emailError) throw new Error(`Could not load order: ${emailError.message}`)
+  return byEmail ? normaliseOrder(byEmail) : null
+}
+
+async function customerPayload(customerId: string) {
+  if (!customerId || customerId === 'guest') throw new Error('A signed-in customer is required.')
+  const localUser = await findById(customerId)
+  if (!localUser) throw new Error('Customer account could not be found.')
+  return {
+    id: localUser.id,
+    name: localUser.name,
+    email: localUser.email,
+    phone: localUser.phone || '',
+    password_hash: localUser.passwordHash || 'synced_customer',
+    email_verified: localUser.emailVerified ?? true,
+    addresses: localUser.addresses || [],
+    created_at: localUser.createdAt || new Date().toISOString(),
+  }
+}
+
+export type CartStockIssue = {
+  productId: string
+  productName: string
+  requested: number
+  available: number
+  madeToOrder: boolean
+  reason: 'insufficient_stock' | 'out_of_stock' | 'not_found' | 'unpublished'
+}
+
+function resolveProductStock(dbP: any | undefined, fallbackP: (typeof products)[number] | undefined) {
+  const stock = Number(
+    dbP != null
+      ? dbP.ready_to_ship_stock ?? dbP.readyToShipStock ?? 0
+      : fallbackP != null
+        ? fallbackP.readyToShipStock ?? 0
+        : 0,
   )
+  const isMadeToOrder = Boolean(
+    dbP != null ? (dbP.made_to_order ?? dbP.madeToOrder ?? true) : fallbackP != null ? (fallbackP.madeToOrder ?? true) : true,
+  )
+  return { stock, isMadeToOrder }
 }
 
-async function ensureCustomerInSupabase(customerId: string): Promise<string | null> {
-  if (!customerId || customerId === 'guest') return null
-  try {
-    const { data: existing } = await supabase
-      .from('customers')
-      .select('id')
-      .eq('id', customerId)
-      .maybeSingle()
-    if (existing?.id) return existing.id
+export async function validateCartLines(items: Array<{ productId: string; quantity: number }>) {
+  const { data: dbProducts } = await supabase.from('products').select('id,name,ready_to_ship_stock,made_to_order,status')
+  const liveCatalog = dbProducts && dbProducts.length > 0 ? dbProducts : []
+  const issues: CartStockIssue[] = []
 
-    const localUser = await findById(customerId)
-    if (localUser) {
-      const { data: inserted, error } = await supabase.from('customers').insert([{
-        id: localUser.id,
-        name: localUser.name,
-        email: localUser.email,
-        phone: localUser.phone || '',
-        password_hash: localUser.passwordHash || 'synced_customer',
-        email_verified: localUser.emailVerified ?? true,
-        addresses: localUser.addresses || [],
-        created_at: localUser.createdAt || new Date().toISOString(),
-      }]).select()
-      if (!error && inserted?.[0]) return inserted[0].id
+  for (const line of items) {
+    if (line.quantity < 1) continue
+    const dbP = liveCatalog.find((entry: any) => entry.id === line.productId)
+    const fallbackP = products.find((entry) => entry.id === line.productId)
+    const p = dbP || fallbackP
+    if (!p) {
+      issues.push({
+        productId: line.productId,
+        productName: line.productId,
+        requested: line.quantity,
+        available: 0,
+        madeToOrder: true,
+        reason: 'not_found',
+      })
+      continue
     }
-  } catch (err) {
-    console.warn('[Supabase Customer Link Warning]:', err)
+    if (dbP && dbP.status && dbP.status !== 'published') {
+      issues.push({
+        productId: line.productId,
+        productName: String(p.name),
+        requested: line.quantity,
+        available: 0,
+        madeToOrder: false,
+        reason: 'unpublished',
+      })
+      continue
+    }
+    const { stock, isMadeToOrder } = resolveProductStock(dbP, fallbackP)
+    if (isMadeToOrder) continue
+    if (stock <= 0) {
+      issues.push({
+        productId: line.productId,
+        productName: String(p.name),
+        requested: line.quantity,
+        available: 0,
+        madeToOrder: false,
+        reason: 'out_of_stock',
+      })
+    } else if (line.quantity > stock) {
+      issues.push({
+        productId: line.productId,
+        productName: String(p.name),
+        requested: line.quantity,
+        available: stock,
+        madeToOrder: false,
+        reason: 'insufficient_stock',
+      })
+    }
   }
-  return null
-}
 
-export async function persistOrderToSupabase(order: Order) {
-  try {
-    const validCustomerId = await ensureCustomerInSupabase(order.customerId)
-    const dbOrder = {
-      id: order.id,
-      number: order.number,
-      customer_id: validCustomerId,
-      items: order.items,
-      address: order.shippingAddress,
-      coupon: order.coupon,
-      subtotal: order.subtotal,
-      discount: order.discount,
-      shipping: 0,
-      tax: 0,
-      total: order.total,
-      payment_method: order.paymentMethod || 'demo',
-      payment_status: order.paymentStatus || 'pending',
-      fulfilment_status: order.fulfilmentStatus || 'placed',
-      razorpay_order_id: order.razorpayOrderId,
-      razorpay_payment_id: order.razorpayPaymentId,
-      created_at: order.createdAt,
-      updated_at: new Date().toISOString(),
-    }
-
-    const { error: oErr } = await supabase.from('orders').upsert([dbOrder], { onConflict: 'id' })
-    if (oErr) {
-      console.error('[Supabase Order Upsert Error]:', oErr.message)
-    } else {
-      console.log(`[Supabase Order Saved]: ${order.number} (${order.paymentStatus})`)
-    }
-
-    // Attempt order_items insertion
-    if (Array.isArray(order.items) && order.items.length) {
-      const dbItems = order.items.map((it, idx) => ({
-        id: `item_${order.id}_${idx}`,
-        order_id: order.id,
-        product_id: it.productId,
-        quantity: it.quantity,
-        price_at_purchase: it.unitPrice,
-        product_name_snapshot: it.name || 'Artisanal Piece',
-        product_sku_snapshot: it.productId || '',
-        variant_details: { finish: it.finish, customization: it.customization },
-      }))
-      const { error: iErr } = await supabase.from('order_items').upsert(dbItems, { onConflict: 'id' })
-      if (iErr) {
-        console.warn('[Supabase Order Items Notice]:', iErr.message)
-      }
-    }
-  } catch (err) {
-    console.error('[Supabase Order Sync Exception]:', err)
-  }
-}
-
-async function decrementPurchasedStock(items: OrderItem[]) {
-  try {
-    for (const item of items) {
-      const { data: prod } = await supabase
-        .from('products')
-        .select('id, ready_to_ship_stock, made_to_order')
-        .eq('id', item.productId)
-        .maybeSingle()
-      if (prod && !prod.made_to_order) {
-        const currentStock = Number(prod.ready_to_ship_stock) || 0
-        const newStock = Math.max(0, currentStock - item.quantity)
-        await supabase.from('products').update({ ready_to_ship_stock: newStock }).eq('id', item.productId)
-        console.log(`[Supabase Stock Decremented]: Product ${item.productId} stock updated from ${currentStock} to ${newStock}`)
-      }
-    }
-  } catch (err) {
-    console.warn('[Supabase Stock Decrement Notice]:', err)
-  }
+  if (issues.length) return { ok: false as const, issues }
+  return { ok: true as const, issues: [] as CartStockIssue[] }
 }
 
 export async function createOrderFromCart(
@@ -249,6 +310,28 @@ export async function createOrderFromCart(
     cartFingerprint?: string
   },
 ) {
+  const stockCheck = await validateCartLines(input.items.map((line) => ({ productId: line.productId, quantity: line.quantity })))
+  if (!stockCheck.ok) {
+    const first = stockCheck.issues[0]
+    const message =
+      first.reason === 'out_of_stock'
+        ? `"${first.productName}" is out of stock. Remove it from your bag or choose made-to-order pieces.`
+        : first.reason === 'insufficient_stock'
+          ? `Only ${first.available} unit${first.available === 1 ? '' : 's'} left for "${first.productName}" — you asked for ${first.requested}.`
+          : first.reason === 'not_found'
+            ? 'An item in your bag is no longer available.'
+            : `"${first.productName}" is not available to buy right now.`
+    return {
+      error: 'insufficient_stock' as const,
+      message,
+      productId: first.productId,
+      productName: first.productName,
+      availableStock: first.available,
+      requestedQuantity: first.requested,
+      issues: stockCheck.issues,
+    }
+  }
+
   // 1. Fetch live product details and availability from Supabase
   const { data: dbProducts } = await supabase.from('products').select('*')
   const liveCatalog = dbProducts && dbProducts.length > 0 ? dbProducts : []
@@ -260,17 +343,21 @@ export async function createOrderFromCart(
     const p = dbP || fallbackP
     if (!p || line.quantity < 1) continue
 
-    const stock = Number(dbP ? (dbP.ready_to_ship_stock ?? dbP.readyToShipStock) : 10)
-    const isMadeToOrder = Boolean(dbP ? (dbP.made_to_order ?? dbP.madeToOrder) : true)
+    const { stock, isMadeToOrder } = resolveProductStock(dbP, fallbackP)
 
     if (!isMadeToOrder && line.quantity > stock) {
       return {
         error: 'insufficient_stock' as const,
         message: `Only ${stock} unit${stock === 1 ? '' : 's'} available in stock for "${p.name}".`,
+        productId: line.productId,
+        productName: String(p.name),
+        availableStock: stock,
+        requestedQuantity: line.quantity,
       }
     }
 
-    const basePrice = Number(p.price) || 0
+    const festivePct = Number(dbP?.festive_discount_percent ?? fallbackP?.festiveDiscountPercent) || 0
+    const basePrice = effectiveSellingPrice(Number(p.price) || 0, festivePct)
     const images = Array.isArray(p.images) ? p.images : []
     const finishes = Array.isArray(p.finishes) ? p.finishes : ['Standard']
 
@@ -364,15 +451,23 @@ export async function createOrderFromCart(
     } else if (code === DEMO_COUPON.code) {
       appliedCoupon = DEMO_COUPON.code
       discount = Math.round(subtotal * (DEMO_COUPON.percent / 100))
+    } else {
+      const fileCoupon = findCouponByCode(code)
+      if (fileCoupon) {
+        const applied = applyFileCouponDiscount(fileCoupon, subtotal, customerId)
+        if (applied.ok) {
+          appliedCoupon = code
+          discount = applied.discount
+        }
+      }
     }
   }
 
   const coupon = appliedCoupon
   const total = Math.max(0, subtotal - discount)
-  const orders = readAll()
   const order: Order = {
     id: randomBytes(10).toString('hex'),
-    number: `CK${String(orders.length + 10841).padStart(6, '0')}`,
+    number: `CK${randomBytes(8).toString('hex').toUpperCase()}`,
     customerId,
     createdAt: new Date().toISOString(),
     items,
@@ -395,62 +490,85 @@ export async function createOrderFromCart(
     paymentMethod: null,
   }
 
-  orders.push(order)
-  writeAll(orders)
-
-  // Persist order asynchronously to Supabase
-  await persistOrderToSupabase(order)
-
-  return { order }
-}
-
-export function findReusableCheckoutOrder(customerId: string, fingerprint: string) {
-  return (
-    listOrdersForCustomer(customerId).find(
-      (order) =>
-        order.cartFingerprint === fingerprint &&
-        order.paymentStatus !== 'paid' &&
-        order.paymentStatus !== 'refunded',
-    ) ?? null
-  )
-}
-
-export function saveOrder(next: Order) {
-  const orders = readAll()
-  const index = orders.findIndex((order) => order.id === next.id)
-  if (index === -1) return null
-  orders[index] = next
-  writeAll(orders)
-  return next
-}
-
-export function attachRazorpayOrder(orderId: string, customerId: string, razorpayOrderId: string) {
-  const order = getOrderForCustomer(customerId, orderId)
-  if (!order) return null
-  const saved = saveOrder({
-    ...order,
-    paymentStatus: order.paymentStatus === 'paid' ? 'paid' : 'pending',
-    razorpayOrderId,
-    paymentError: null,
+  const customer = await customerPayload(customerId)
+  const checkoutKey = input.cartFingerprint || `${customerId}:${order.id}`
+  const { data, error } = await supabase.rpc('create_order_transaction', {
+    p_customer: customer,
+    p_order: {
+      ...order,
+      address: order.shippingAddress,
+      payment_method: order.paymentMethod,
+      payment_status: order.paymentStatus,
+      fulfilment_status: order.fulfilmentStatus,
+      razorpay_order_id: order.razorpayOrderId,
+      razorpay_payment_id: order.razorpayPaymentId,
+      checkout_key: checkoutKey,
+    },
+    p_items: order.items,
   })
-  if (saved) {
-    void persistOrderToSupabase(saved)
-  }
-  return saved
+  if (error) throw new Error(`Could not save order: ${error.message}`)
+  if (!data) throw new Error('Could not save order: the database returned no order.')
+  let saved = normaliseOrder(data)
+  const tracking = nextTrackingNumber(saved)
+  const { data: patched, error: patchError } = await supabase
+    .from('orders')
+    .update({
+      tracking_number: tracking,
+      estimated_delivery: saved.estimatedDelivery || saved.createdAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', saved.id)
+    .select('*')
+    .maybeSingle()
+  if (!patchError && patched) saved = normaliseOrder(patched)
+  else saved = { ...saved, trackingNumber: tracking, estimatedDelivery: saved.estimatedDelivery || saved.createdAt }
+  return { order: saved }
 }
 
-export function markOrderPaymentFailed(orderId: string, customerId: string, message: string) {
-  const order = getOrderForCustomer(customerId, orderId)
-  if (!order || order.paymentStatus === 'paid') return order
-  const saved = saveOrder({
-    ...order,
-    paymentStatus: 'failed',
-    paymentError: message,
-  })
-  if (saved) {
-    void persistOrderToSupabase(saved)
-  }
-  return saved
+export function tryRedeemOrderCoupon(customerId: string, couponCode: string | null | undefined) {
+  if (!couponCode?.trim()) return
+  const fileCoupon = findCouponByCode(couponCode)
+  if (fileCoupon?.personal) redeemPersonalCoupon(couponCode, customerId)
+}
+
+export async function findReusableCheckoutOrder(customerId: string, fingerprint: string) {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('customer_id', customerId)
+    .eq('checkout_key', fingerprint)
+    .neq('payment_status', 'paid')
+    .neq('payment_status', 'refunded')
+    .neq('payment_status', 'failed')
+    .maybeSingle()
+  if (error) throw new Error(`Could not check for an existing checkout: ${error.message}`)
+  return data ? normaliseOrder(data) : null
+}
+
+export async function attachRazorpayOrder(orderId: string, customerId: string, razorpayOrderId: string) {
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ razorpay_order_id: razorpayOrderId, payment_status: 'pending', updated_at: new Date().toISOString() })
+    .eq('id', orderId)
+    .eq('customer_id', customerId)
+    .neq('payment_status', 'paid')
+    .select('*')
+    .maybeSingle()
+  if (error) throw new Error(`Could not attach payment order: ${error.message}`)
+  return data ? normaliseOrder(data) : null
+}
+
+export async function markOrderPaymentFailed(orderId: string, customerId: string, message: string) {
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ payment_status: 'failed', payment_error: message, updated_at: new Date().toISOString() })
+    .eq('id', orderId)
+    .eq('customer_id', customerId)
+    .neq('payment_status', 'paid')
+    .select('*')
+    .maybeSingle()
+  if (error) throw new Error(`Could not save payment failure: ${error.message}`)
+  return data ? normaliseOrder(data) : null
 }
 
 export async function markOrderPaid(
@@ -463,54 +581,150 @@ export async function markOrderPaid(
     deliveryMethod?: string | null
   },
 ) {
-  const order = getOrderForCustomer(customerId, input.orderId)
-  if (!order) return { error: 'missing' as const }
-  if (order.razorpayOrderId !== input.razorpayOrderId) return { error: 'mismatch' as const }
-  if (order.paymentStatus === 'paid') return { order }
-  const paid = saveOrder({
-    ...order,
-    paymentStatus: 'paid',
-    fulfilmentStatus: order.fulfilmentStatus === 'placed' ? 'confirmed' : order.fulfilmentStatus,
-    razorpayPaymentId: input.razorpayPaymentId,
-    paymentMethod: input.paymentMethod ?? order.paymentMethod,
-    deliveryMethod: input.deliveryMethod ?? order.deliveryMethod,
-    trackingNumber: nextTrackingNumber(order),
-    paymentError: null,
+  const { data, error } = await supabase.rpc('mark_order_paid_transaction', {
+    p_order_id: input.orderId,
+    p_customer_id: customerId,
+    p_razorpay_order_id: input.razorpayOrderId,
+    p_razorpay_payment_id: input.razorpayPaymentId,
+    p_payment_method: input.paymentMethod ?? 'razorpay',
+    p_delivery_method: input.deliveryMethod ?? null,
   })
-  if (!paid) return { error: 'missing' as const }
-
-  // Persist paid status immediately to Supabase
-  await persistOrderToSupabase(paid)
-
-  // Decrement inventory stock for purchased ready-to-ship items
-  await decrementPurchasedStock(paid.items)
-
-  return { order: paid }
+  if (error) throw new Error(`Could not save payment: ${error.message}`)
+  if (!data) return { error: 'missing' as const }
+  return { order: normaliseOrder(data) }
 }
 
 export async function markCashOnDelivery(
   customerId: string,
   input: { orderId: string; razorpayOrderId: string },
 ) {
-  const order = getOrderForCustomer(customerId, input.orderId)
-  if (!order) return { error: 'missing' as const }
-  if (order.razorpayOrderId !== input.razorpayOrderId) return { error: 'mismatch' as const }
-  if (order.paymentStatus === 'paid') return { order }
-  const next = saveOrder({
-    ...order,
-    paymentStatus: 'pending',
-    fulfilmentStatus: order.fulfilmentStatus === 'placed' ? 'confirmed' : order.fulfilmentStatus,
-    paymentMethod: 'cash',
-    deliveryMethod: 'Cash on delivery',
-    trackingNumber: nextTrackingNumber(order),
-    paymentError: null,
+  const { data, error } = await supabase.rpc('mark_order_cash_transaction', {
+    p_order_id: input.orderId,
+    p_customer_id: customerId,
+    p_razorpay_order_id: input.razorpayOrderId,
   })
-  if (!next) return { error: 'missing' as const }
+  if (error) throw new Error(`Could not save cash-on-delivery order: ${error.message}`)
+  return data ? { order: normaliseOrder(data) } : { error: 'missing' as const }
+}
 
-  await persistOrderToSupabase(next)
+export async function createOrderFromBespokeQuote(
+  customerId: string,
+  input: {
+    customRequestId: string
+    productName: string
+    productId?: string
+    image?: string
+    quoteAmount: number
+    contact: OrderContact
+    address: Address | null
+  },
+) {
+  const amount = Math.round(Number(input.quoteAmount))
+  if (!Number.isFinite(amount) || amount < 1) {
+    return { error: 'invalid_quote' as const, message: 'A valid commission amount is required.' }
+  }
 
-  // Decrement inventory stock for purchased ready-to-ship items
-  await decrementPurchasedStock(next.items)
+  await supabase.from('products').upsert(
+    [
+      {
+        id: BESPOKE_COMMISSION_PRODUCT_ID,
+        slug: 'bespoke-commission',
+        name: 'Bespoke atelier commission',
+        sku: 'CK-BESPOKE',
+        price: 0,
+        category: 'Custom',
+        category_id: 'cat_sofas',
+        space: 'living',
+        status: 'archived',
+        made_to_order: true,
+        ready_to_ship_stock: 0,
+      },
+    ],
+    { onConflict: 'id' },
+  )
 
-  return { order: next }
+  const checkoutKey = `bespoke:${input.customRequestId}`
+  const reuse = await findReusableCheckoutOrder(customerId, checkoutKey)
+  if (reuse) {
+    await linkCustomRequestOrder(input.customRequestId, reuse.id)
+    return { order: reuse }
+  }
+
+  const items: OrderItem[] = [
+    {
+      productId: BESPOKE_COMMISSION_PRODUCT_ID,
+      name: `Bespoke · ${input.productName}`,
+      slug: 'bespoke-commission',
+      image: input.image || '/hero-living-hd.jpg',
+      finish: 'Atelier commission',
+      quantity: 1,
+      unitPrice: amount,
+      customization: {
+        customRequestId: input.customRequestId,
+        type: 'bespoke',
+        sourceProductId: input.productId || null,
+      },
+    },
+  ]
+
+  const subtotal = amount
+  const order: Order = {
+    id: randomBytes(10).toString('hex'),
+    number: `CK${randomBytes(8).toString('hex').toUpperCase()}`,
+    customerId,
+    createdAt: new Date().toISOString(),
+    items,
+    subtotal,
+    discount: 0,
+    total: subtotal,
+    coupon: null,
+    paymentStatus: 'pending',
+    fulfilmentStatus: 'placed',
+    shippingAddress: input.address,
+    deliveryMethod: null,
+    trackingNumber: null,
+    estimatedDelivery: null,
+    contact: input.contact,
+    cartFingerprint: checkoutKey,
+    amountPaise: Math.round(subtotal * 100),
+    razorpayOrderId: null,
+    razorpayPaymentId: null,
+    paymentError: null,
+    paymentMethod: null,
+  }
+
+  const customer = await customerPayload(customerId)
+  const { data, error } = await supabase.rpc('create_order_transaction', {
+    p_customer: customer,
+    p_order: {
+      ...order,
+      address: order.shippingAddress,
+      payment_method: order.paymentMethod,
+      payment_status: order.paymentStatus,
+      fulfilment_status: order.fulfilmentStatus,
+      razorpay_order_id: order.razorpayOrderId,
+      razorpay_payment_id: order.razorpayPaymentId,
+      checkout_key: checkoutKey,
+    },
+    p_items: order.items,
+  })
+  if (error) throw new Error(`Could not save commission order: ${error.message}`)
+  if (!data) throw new Error('Could not save commission order: the database returned no order.')
+  let saved = normaliseOrder(data)
+  const tracking = nextTrackingNumber(saved)
+  const { data: patched, error: patchError } = await supabase
+    .from('orders')
+    .update({
+      tracking_number: tracking,
+      estimated_delivery: saved.estimatedDelivery || saved.createdAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', saved.id)
+    .select('*')
+    .maybeSingle()
+  if (!patchError && patched) saved = normaliseOrder(patched)
+  else saved = { ...saved, trackingNumber: tracking, estimatedDelivery: saved.estimatedDelivery || saved.createdAt }
+
+  await linkCustomRequestOrder(input.customRequestId, saved.id)
+  return { order: saved }
 }
