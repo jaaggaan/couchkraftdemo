@@ -228,12 +228,39 @@ export async function handleCouchkraftApi(
     !url.startsWith('/api/coupons') &&
     !url.startsWith('/api/account') &&
     !url.startsWith('/api/settings') &&
-    !url.startsWith('/api/custom-requests')
+    !url.startsWith('/api/custom-requests') &&
+    !url.startsWith('/api/health')
   ) {
     return false
   }
 
   try {
+          if (req.method === 'GET' && url === '/api/health') {
+            const missing: string[] = []
+            if (!runtimeEnv.SUPABASE_URL?.trim()) missing.push('SUPABASE_URL')
+            if (!runtimeEnv.SUPABASE_SERVICE_ROLE_KEY?.trim()) missing.push('SUPABASE_SERVICE_ROLE_KEY')
+            if (!runtimeEnv.COUCHKRAFT_AUTH_SECRET?.trim()) missing.push('COUCHKRAFT_AUTH_SECRET')
+            let dbOk = false
+            let dbError = ''
+            if (missing.length === 0) {
+              try {
+                const { error } = await supabase.from('products').select('id').limit(1)
+                dbOk = !error
+                if (error) dbError = error.message
+              } catch (err) {
+                dbError = err instanceof Error ? err.message : 'Database check failed'
+              }
+            }
+            const ok = missing.length === 0 && dbOk
+            return send(res, ok ? 200 : 503, {
+              ok,
+              missing,
+              dbOk,
+              dbError: dbError || undefined,
+              vercel: Boolean(runtimeEnv.VERCEL),
+            })
+          }
+
           if (req.method === 'GET' && url === '/api/settings/public') {
             const settings = await fetchLiveSettings()
             return send(res, 200, {
@@ -989,8 +1016,13 @@ export async function handleCouchkraftApi(
           }
 
           return send(res, 404, { error: 'Not found.' })
-  } catch {
-    return send(res, 500, { error: 'Something went wrong. Please try again.' })
+  } catch (error) {
+    console.error('[Couchkraft API]', url, error)
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : 'Something went wrong. Please try again.'
+    return send(res, 500, { error: message })
   }
 }
 

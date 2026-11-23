@@ -2925,10 +2925,35 @@ function requestApiPath(req) {
 async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
   const raw = requestApiPath(req);
   const url = raw.startsWith("/api/") || raw === "/api" ? raw : `/api${raw.startsWith("/") ? raw : `/${raw}`}`;
-  if (!url.startsWith("/api/auth") && !url.startsWith("/api/orders") && !url.startsWith("/api/addresses") && !url.startsWith("/api/checkout") && !url.startsWith("/api/cart") && !url.startsWith("/api/admin") && !url.startsWith("/api/products") && !url.startsWith("/api/banners") && !url.startsWith("/api/coupons") && !url.startsWith("/api/account") && !url.startsWith("/api/settings") && !url.startsWith("/api/custom-requests")) {
+  if (!url.startsWith("/api/auth") && !url.startsWith("/api/orders") && !url.startsWith("/api/addresses") && !url.startsWith("/api/checkout") && !url.startsWith("/api/cart") && !url.startsWith("/api/admin") && !url.startsWith("/api/products") && !url.startsWith("/api/banners") && !url.startsWith("/api/coupons") && !url.startsWith("/api/account") && !url.startsWith("/api/settings") && !url.startsWith("/api/custom-requests") && !url.startsWith("/api/health")) {
     return false;
   }
   try {
+    if (req.method === "GET" && url === "/api/health") {
+      const missing = [];
+      if (!runtimeEnv.SUPABASE_URL?.trim()) missing.push("SUPABASE_URL");
+      if (!runtimeEnv.SUPABASE_SERVICE_ROLE_KEY?.trim()) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+      if (!runtimeEnv.COUCHKRAFT_AUTH_SECRET?.trim()) missing.push("COUCHKRAFT_AUTH_SECRET");
+      let dbOk = false;
+      let dbError = "";
+      if (missing.length === 0) {
+        try {
+          const { error } = await supabase.from("products").select("id").limit(1);
+          dbOk = !error;
+          if (error) dbError = error.message;
+        } catch (err) {
+          dbError = err instanceof Error ? err.message : "Database check failed";
+        }
+      }
+      const ok = missing.length === 0 && dbOk;
+      return send2(res, ok ? 200 : 503, {
+        ok,
+        missing,
+        dbOk,
+        dbError: dbError || void 0,
+        vercel: Boolean(runtimeEnv.VERCEL)
+      });
+    }
     if (req.method === "GET" && url === "/api/settings/public") {
       const settings = await fetchLiveSettings();
       return send2(res, 200, {
@@ -3602,8 +3627,10 @@ async function handleCouchkraftApi(req, res, runtimeEnv = process.env) {
       return send2(res, 200, { message: "Password updated. You can sign in now." });
     }
     return send2(res, 404, { error: "Not found." });
-  } catch {
-    return send2(res, 500, { error: "Something went wrong. Please try again." });
+  } catch (error) {
+    console.error("[Couchkraft API]", url, error);
+    const message = error instanceof Error && error.message.trim() ? error.message : "Something went wrong. Please try again.";
+    return send2(res, 500, { error: message });
   }
 }
 

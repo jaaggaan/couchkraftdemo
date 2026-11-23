@@ -62,6 +62,10 @@ Optional: `COUCHKRAFT_ADMIN_SECRET` (admin JWT signing; has a default).
 
 **Never** set `SUPABASE_SERVICE_ROLE_KEY` as a `VITE_*` variable.
 
+The API does **not** read `VITE_SUPABASE_*` for server routes. You must set **`SUPABASE_URL`** and **`SUPABASE_SERVICE_ROLE_KEY`** as plain server variables (no `VITE_` prefix).
+
+After deploy, open `https://<your-domain>/api/health` — you should see `"ok": true`. If `"missing"` lists env names, add them in Vercel and **Redeploy**.
+
 ## 4. Routing (`vercel.json`)
 
 - `/api/(.*)` → single function with `__ck` path rewrite (already configured).
