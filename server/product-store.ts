@@ -70,17 +70,43 @@ export function resolveCategoryId(categoryName: string, explicitId?: string): st
   return 'cat_sofas'
 }
 
+function normalizeSlug(raw: string): string {
+  return String(raw || 'product')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'product'
+}
+
+/** Avoid products_slug_key violations by suffixing when the slug is taken. */
+async function uniqueProductSlug(base: string, excludeId?: string): Promise<string> {
+  const root = normalizeSlug(base)
+  for (let n = 0; n < 25; n++) {
+    const slug = n === 0 ? root : `${root}-${n + 1}`
+    let query = supabase.from('products').select('id').eq('slug', slug).limit(1)
+    if (excludeId) query = query.neq('id', excludeId)
+    const { data, error } = await query.maybeSingle()
+    if (error) {
+      console.warn('[ProductStore] uniqueProductSlug:', error.message)
+      return `${root}-${Date.now().toString(36)}`
+    }
+    if (!data) return slug
+  }
+  return `${root}-${Date.now().toString(36)}`
+}
+
+function duplicateSlugMessage(errorMessage: string): string | null {
+  if (!/products_slug_key|duplicate key.*slug/i.test(errorMessage)) return null
+  return 'That product URL slug is already in use. Change the slug field or use a different product name, then save again.'
+}
+
 function toProductDbRow(p: any): Record<string, any> {
   const inventoryError = validateInventoryPatch(p)
   if (inventoryError) throw new Error(inventoryError)
   const inventory = normalizeInventoryFields(p)
 
   const name = String(p.name || 'Untitled Piece').trim()
-  const slug = (p.slug || name || 'product')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+  const slug = normalizeSlug(p.slug || name || 'product')
 
   const categoryName = p.category || 'Living Room > Sofas & Couches'
   const categoryId = resolveCategoryId(categoryName, p.categoryId || p.category_id)
@@ -239,6 +265,8 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
   }
 
   const row = toProductDbRow(input)
+  row.slug = await uniqueProductSlug(row.slug)
+
   const { data, error } = await supabase
     .from('products')
     .insert([row])
@@ -246,7 +274,8 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
 
   if (error) {
     console.error('[ProductStore] Supabase createProduct error:', error.message)
-    throw new Error(`Database error creating product: ${error.message}`)
+    const friendly = duplicateSlugMessage(error.message)
+    throw new Error(friendly || `Database error creating product: ${error.message}`)
   }
 
   if (!data || !data.length) {
@@ -258,6 +287,7 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
 
 export async function updateProduct(id: string, updates: Partial<Product>): Promise<Product | null> {
   const row = toProductDbRow({ ...updates, id })
+  row.slug = await uniqueProductSlug(row.slug, id)
   const { id: _, ...updatePayload } = row
 
   const { data, error } = await supabase
@@ -268,7 +298,8 @@ export async function updateProduct(id: string, updates: Partial<Product>): Prom
 
   if (error) {
     console.error('[ProductStore] Supabase updateProduct error:', error.message)
-    throw new Error(`Database error updating product: ${error.message}`)
+    const friendly = duplicateSlugMessage(error.message)
+    throw new Error(friendly || `Database error updating product: ${error.message}`)
   }
 
   if (!data || !data.length) {

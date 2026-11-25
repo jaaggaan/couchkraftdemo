@@ -580,12 +580,34 @@ function resolveCategoryId(categoryName, explicitId) {
   if (lower.includes("accent") || lower.includes("study") || lower.includes("daybed") || lower.includes("bed") || lower.includes("mirror") || lower.includes("lighting") || lower.includes("light") || lower.includes("ottoman")) return "cat_accent";
   return "cat_sofas";
 }
+function normalizeSlug(raw) {
+  return String(raw || "product").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "product";
+}
+async function uniqueProductSlug(base, excludeId) {
+  const root = normalizeSlug(base);
+  for (let n = 0; n < 25; n++) {
+    const slug = n === 0 ? root : `${root}-${n + 1}`;
+    let query = supabase.from("products").select("id").eq("slug", slug).limit(1);
+    if (excludeId) query = query.neq("id", excludeId);
+    const { data, error } = await query.maybeSingle();
+    if (error) {
+      console.warn("[ProductStore] uniqueProductSlug:", error.message);
+      return `${root}-${Date.now().toString(36)}`;
+    }
+    if (!data) return slug;
+  }
+  return `${root}-${Date.now().toString(36)}`;
+}
+function duplicateSlugMessage(errorMessage) {
+  if (!/products_slug_key|duplicate key.*slug/i.test(errorMessage)) return null;
+  return "That product URL slug is already in use. Change the slug field or use a different product name, then save again.";
+}
 function toProductDbRow(p) {
   const inventoryError = validateInventoryPatch(p);
   if (inventoryError) throw new Error(inventoryError);
   const inventory = normalizeInventoryFields(p);
   const name = String(p.name || "Untitled Piece").trim();
-  const slug = (p.slug || name || "product").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = normalizeSlug(p.slug || name || "product");
   const categoryName = p.category || "Living Room > Sofas & Couches";
   const categoryId = resolveCategoryId(categoryName, p.categoryId || p.category_id);
   const dimensions = p.dimensions && typeof p.dimensions === "object" ? { ...p.dimensions } : { width: 200, depth: 90, height: 80, seatHeight: 42 };
@@ -716,10 +738,12 @@ async function createProduct(input) {
     throw new Error("Product name is required.");
   }
   const row = toProductDbRow(input);
+  row.slug = await uniqueProductSlug(row.slug);
   const { data, error } = await supabase.from("products").insert([row]).select();
   if (error) {
     console.error("[ProductStore] Supabase createProduct error:", error.message);
-    throw new Error(`Database error creating product: ${error.message}`);
+    const friendly = duplicateSlugMessage(error.message);
+    throw new Error(friendly || `Database error creating product: ${error.message}`);
   }
   if (!data || !data.length) {
     throw new Error("Failed to create product in database.");
@@ -728,11 +752,13 @@ async function createProduct(input) {
 }
 async function updateProduct(id, updates) {
   const row = toProductDbRow({ ...updates, id });
+  row.slug = await uniqueProductSlug(row.slug, id);
   const { id: _, ...updatePayload } = row;
   const { data, error } = await supabase.from("products").update({ ...updatePayload, updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", id).select();
   if (error) {
     console.error("[ProductStore] Supabase updateProduct error:", error.message);
-    throw new Error(`Database error updating product: ${error.message}`);
+    const friendly = duplicateSlugMessage(error.message);
+    throw new Error(friendly || `Database error updating product: ${error.message}`);
   }
   if (!data || !data.length) {
     return null;
